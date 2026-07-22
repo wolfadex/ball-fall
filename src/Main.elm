@@ -221,18 +221,24 @@ simulateStep model =
                             in
                             if applyForward || applyBackward || applyLeft || applyRight then
                                 let
+                                    cameraFrame =
+                                        Physics.frame body
+                                            |> Frame3d.originPoint
+                                            |> camera
+                                            |> Camera3d.frame
+
                                     verticalParts =
                                         if applyForward && applyBackward then
                                             { x = 0, y = 0, z = 0 }
 
                                         else if applyForward then
-                                            Camera3d.frame camera
+                                            cameraFrame
                                                 |> Frame3d.xDirection
                                                 |> Direction3d.unwrap
                                                 |> (\p -> { x = -p.x, y = -p.y, z = 0 })
 
                                         else if applyBackward then
-                                            Camera3d.frame camera
+                                            cameraFrame
                                                 |> Frame3d.xDirection
                                                 |> Direction3d.unwrap
 
@@ -244,13 +250,13 @@ simulateStep model =
                                             { x = 0, y = 0, z = 0 }
 
                                         else if applyLeft then
-                                            Camera3d.frame camera
+                                            cameraFrame
                                                 |> Frame3d.yDirection
                                                 |> Direction3d.unwrap
                                                 |> (\p -> { x = -p.x, y = -p.y, z = 0 })
 
                                         else if applyRight then
-                                            Camera3d.frame camera
+                                            cameraFrame
                                                 |> Frame3d.yDirection
                                                 |> Direction3d.unwrap
 
@@ -300,7 +306,13 @@ view3d model =
         , sunlightDirection = Direction3d.negativeZ
         , shadows = True
         , dimensions = ( Pixels.int 800, Pixels.int 600 )
-        , camera = camera
+        , camera =
+            model.bodies
+                |> List.filter (\( id, body ) -> id == Ball)
+                |> List.head
+                |> Maybe.map (\( _, body ) -> Physics.frame body |> Frame3d.originPoint)
+                |> Maybe.withDefault (Point3d.meters 0 0 0)
+                |> camera
         , clipDepth = Length.millimeters 2
         , background = Scene3d.backgroundColor Color.black
         , entities =
@@ -344,10 +356,12 @@ view3d model =
         }
 
 
-camera =
+camera playerPosition =
     Camera3d.lookAt
-        { eyePoint = Point3d.meters 3 3 3
-        , focalPoint = Point3d.meters 0 0 0
+        { eyePoint =
+            playerPosition
+                |> Point3d.translateBy (Vector3d.meters 3 3 3)
+        , focalPoint = playerPosition
         , upDirection = Direction3d.z
         , projection = Camera3d.Perspective
         , fov = Camera3d.angle (Angle.degrees 90)
