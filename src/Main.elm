@@ -1,32 +1,29 @@
 module Main exposing (main)
 
-import Angle exposing (Angle)
-import Block3d exposing (Block3d)
+import Angle
+import Block3d
 import Browser
 import Browser.Events
-import Camera3d exposing (Camera3d)
-import Color exposing (Color)
-import Direction3d exposing (Direction3d)
+import Camera3d
+import Color
+import Direction3d
 import Duration exposing (Duration)
-import Frame3d exposing (Frame3d)
+import Frame3d
 import Html exposing (Html)
-import Html.Attributes
-import Html.Events
 import Json.Decode
-import Length exposing (Length)
-import LineSegment3d exposing (LineSegment3d)
+import Length
 import Physics exposing (onEarth)
 import Physics.Material
 import Physics.Shape
-import Pixels exposing (Pixels)
-import Point3d exposing (Point3d)
+import Pixels
+import Point3d
 import Scene3d
 import Scene3d.Material
 import Set exposing (Set)
 import Sphere3d exposing (Sphere3d)
 import Timestep exposing (Timestep)
 import Torque
-import Vector3d exposing (Vector3d)
+import Vector3d
 
 
 main : Program () Model Msg
@@ -163,7 +160,7 @@ playerSphere =
 
 
 subscriptions : Model -> Sub Msg
-subscriptions model =
+subscriptions _ =
     Sub.batch
         [ Browser.Events.onAnimationFrameDelta (\d -> Tick (Duration.milliseconds d))
         , Browser.Events.onKeyDown
@@ -307,42 +304,43 @@ view3d model =
         , clipDepth = Length.millimeters 2
         , background = Scene3d.backgroundColor Color.black
         , entities =
-            Scene3d.lineSegment
-                (Scene3d.Material.color Color.red)
-                (LineSegment3d.from
-                    (Point3d.meters 0 0 1)
-                    (Point3d.meters 2 0 1)
-                )
-                :: Scene3d.lineSegment
-                    (Scene3d.Material.color Color.green)
-                    (LineSegment3d.from
-                        (Point3d.meters 0 0 1)
-                        (Point3d.meters 0 2 1)
-                    )
-                :: Scene3d.lineSegment
-                    (Scene3d.Material.color Color.blue)
-                    (LineSegment3d.from
-                        (Point3d.meters 0 0 1)
-                        (Point3d.meters 0 0 3)
-                    )
-                :: List.map
-                    (\( id, body ) ->
-                        case id of
-                            Ball ->
-                                Scene3d.sphereWithShadow
-                                    (Scene3d.Material.matte Color.green)
-                                    (Sphere3d.placeIn (Physics.frame body)
-                                        playerSphere
-                                    )
+            -- Scene3d.lineSegment
+            --     (Scene3d.Material.color Color.red)
+            --     (LineSegment3d.from
+            --         (Point3d.meters 0 0 1)
+            --         (Point3d.meters 2 0 1)
+            --     )
+            --     :: Scene3d.lineSegment
+            --         (Scene3d.Material.color Color.green)
+            --         (LineSegment3d.from
+            --             (Point3d.meters 0 0 1)
+            --             (Point3d.meters 0 2 1)
+            --         )
+            --     :: Scene3d.lineSegment
+            --         (Scene3d.Material.color Color.blue)
+            --         (LineSegment3d.from
+            --             (Point3d.meters 0 0 1)
+            --             (Point3d.meters 0 0 3)
+            --         )
+            --     ::
+            List.map
+                (\( id, body ) ->
+                    case id of
+                        Ball ->
+                            Scene3d.sphereWithShadow
+                                (Scene3d.Material.matte Color.green)
+                                (Sphere3d.placeIn (Physics.frame body)
+                                    playerSphere
+                                )
 
-                            Block ->
-                                Scene3d.blockWithShadow
-                                    (Scene3d.Material.matte Color.white)
-                                    (Block3d.placeIn (Physics.frame body)
-                                        basicBlock
-                                    )
-                    )
-                    model.bodies
+                        Block ->
+                            Scene3d.blockWithShadow
+                                (Scene3d.Material.matte Color.white)
+                                (Block3d.placeIn (Physics.frame body)
+                                    basicBlock
+                                )
+                )
+                model.bodies
         }
 
 
