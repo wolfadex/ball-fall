@@ -18,6 +18,7 @@ import Physics.Material
 import Physics.Shape
 import Pixels
 import Point3d exposing (Point3d)
+import Random
 import Scene3d
 import Scene3d.Material
 import Scene3d.Mesh
@@ -29,7 +30,7 @@ import TriangularMesh exposing (TriangularMesh)
 import Vector3d
 
 
-main : Program () Model Msg
+main : Program Int Model Msg
 main =
     Browser.document
         { init = init
@@ -49,18 +50,40 @@ type alias Model =
     , contacts : Physics.Contacts Id
     , timestep : Timestep
     , floors : List ( Scene3d.Mesh.Uniform Physics.BodyCoordinates, Scene3d.Mesh.Shadow Physics.BodyCoordinates )
+    , seed : Random.Seed
     , keysDown : Set String
     }
 
 
-init : () -> ( Model, Cmd Msg )
-init () =
+init : Int -> ( Model, Cmd Msg )
+init initialSeed =
     let
-        floor =
-            generateFloor ( 1, -1 )
+        ( ( firstHole, secondHole, thirdHole ), seed ) =
+            Random.step
+                (Random.map3 (\one two three -> ( one, two, three ))
+                    nextHole
+                    nextHole
+                    nextHole
+                )
+                (Random.initialSeed initialSeed)
 
-        floorMeshes =
-            floorToMeshes floor
+        floor1 =
+            generateFloor 0 firstHole
+
+        floor1Tris =
+            floorToTris floor1
+
+        floor2 =
+            generateFloor -3 secondHole
+
+        floor2Tris =
+            floorToTris floor2
+
+        floor3 =
+            generateFloor -6 thirdHole
+
+        floor3Tris =
+            floorToTris floor3
     in
     ( { bodies =
             ( Ball
@@ -69,25 +92,41 @@ init () =
                 Physics.Material.wood
                 |> Physics.translateBy (Vector3d.meters 0 0 2)
             )
-                :: List.map floorMeshToBody floorMeshes
+                :: List.map floorMeshToBody floor1Tris
+                ++ List.map floorMeshToBody floor2Tris
+                ++ List.map floorMeshToBody floor3Tris
       , contacts = Physics.emptyContacts
       , timestep = initTimestep
       , floors =
-            List.map
-                (\tris ->
-                    let
-                        mesh =
-                            Scene3d.Mesh.indexedFacets tris
-                    in
-                    ( mesh
-                    , Scene3d.Mesh.shadow mesh
-                    )
-                )
-                floorMeshes
+            [ floorTrisToMesh floor1Tris
+            , floorTrisToMesh floor2Tris
+            , floorTrisToMesh floor3Tris
+            ]
+      , seed = seed
       , keysDown = Set.empty
       }
     , Cmd.none
     )
+
+
+floorTrisToMesh : List (TriangularMesh Vert) -> ( Scene3d.Mesh.Uniform Physics.BodyCoordinates, Scene3d.Mesh.Shadow Physics.BodyCoordinates )
+floorTrisToMesh tris =
+    let
+        mesh =
+            tris
+                |> TriangularMesh.combine
+                |> Scene3d.Mesh.indexedFacets
+    in
+    ( mesh
+    , Scene3d.Mesh.shadow mesh
+    )
+
+
+nextHole : Random.Generator ( Int, Int )
+nextHole =
+    Random.map2 Tuple.pair
+        (Random.int -2 2)
+        (Random.int -2 2)
 
 
 initTimestep : Timestep
@@ -122,8 +161,8 @@ floorMeshToBody floorMesh =
     )
 
 
-floorToMeshes : Floor -> List (TriangularMesh Vert)
-floorToMeshes floor =
+floorToTris : Floor -> List (TriangularMesh Vert)
+floorToTris floor =
     List.map
         (\verts ->
             TriangularMesh.indexed
@@ -149,46 +188,44 @@ floorToMeshes floor =
         ]
 
 
-{-| initially for a 5x5 grid centered on 0,0 (z is ignored for now)
--}
-generateFloor : ( Int, Int ) -> Floor
-generateFloor ( holeX, holeY ) =
+generateFloor : Float -> ( Int, Int ) -> Floor
+generateFloor zOffset ( holeX, holeY ) =
     { leftOfHole =
         if holeY < 2 then
-            [ Point3d.meters -2.5 2.5 0
-            , Point3d.meters -2.5 (toFloat holeY + 0.5) 0
-            , Point3d.meters 2.5 (toFloat holeY + 0.5) 0
-            , Point3d.meters 2.5 2.5 0
+            [ Point3d.meters -2.5 2.5 zOffset
+            , Point3d.meters -2.5 (toFloat holeY + 0.5) zOffset
+            , Point3d.meters 2.5 (toFloat holeY + 0.5) zOffset
+            , Point3d.meters 2.5 2.5 zOffset
             ]
 
         else
             []
     , rightOfHole =
         if holeY > -2 then
-            [ Point3d.meters -2.5 (toFloat holeY - 0.5) 0
-            , Point3d.meters -2.5 -2.5 0
-            , Point3d.meters 2.5 -2.5 0
-            , Point3d.meters 2.5 (toFloat holeY - 0.5) 0
+            [ Point3d.meters -2.5 (toFloat holeY - 0.5) zOffset
+            , Point3d.meters -2.5 -2.5 zOffset
+            , Point3d.meters 2.5 -2.5 zOffset
+            , Point3d.meters 2.5 (toFloat holeY - 0.5) zOffset
             ]
 
         else
             []
     , forwardOfHole =
         if holeX < 2 then
-            [ Point3d.meters (toFloat holeX + 0.5) (toFloat holeY + 0.5) 0
-            , Point3d.meters (toFloat holeX + 0.5) (toFloat holeY + -0.5) 0
-            , Point3d.meters 2.5 (toFloat holeY + -0.5) 0
-            , Point3d.meters 2.5 (toFloat holeY + 0.5) 0
+            [ Point3d.meters (toFloat holeX + 0.5) (toFloat holeY + 0.5) zOffset
+            , Point3d.meters (toFloat holeX + 0.5) (toFloat holeY + -0.5) zOffset
+            , Point3d.meters 2.5 (toFloat holeY + -0.5) zOffset
+            , Point3d.meters 2.5 (toFloat holeY + 0.5) zOffset
             ]
 
         else
             []
     , backwardOfHole =
         if holeX > -2 then
-            [ Point3d.meters -2.5 (toFloat holeY + 0.5) 0
-            , Point3d.meters -2.5 (toFloat holeY + -0.5) 0
-            , Point3d.meters (toFloat holeX - 0.5) (toFloat holeY + -0.5) 0
-            , Point3d.meters (toFloat holeX - 0.5) (toFloat holeY + 0.5) 0
+            [ Point3d.meters -2.5 (toFloat holeY + 0.5) zOffset
+            , Point3d.meters -2.5 (toFloat holeY + -0.5) zOffset
+            , Point3d.meters (toFloat holeX - 0.5) (toFloat holeY + -0.5) zOffset
+            , Point3d.meters (toFloat holeX - 0.5) (toFloat holeY + 0.5) zOffset
             ]
 
         else
