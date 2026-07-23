@@ -2,6 +2,7 @@ module Main exposing (Id, Model, Msg, main)
 
 import Angle
 import Array
+import Block3d exposing (Block3d)
 import Browser
 import Browser.Events
 import Camera3d
@@ -92,12 +93,25 @@ init { initialSeed, width, height } =
 
         fl5 =
             nextFloor fl4.floorCount fl4.seed
+
+        fl6 =
+            nextFloor fl5.floorCount fl5.seed
+
+        fl7 =
+            nextFloor fl6.floorCount fl6.seed
+
+        fl8 =
+            nextFloor fl7.floorCount fl7.seed
     in
     ( { player =
             Physics.sphere
                 playerSphere
                 Physics.Material.wood
                 |> Physics.translateBy (Vector3d.meters 0 0 2)
+                |> Physics.damp
+                    { linear = 0.01
+                    , angular = 0.5
+                    }
       , bodies =
             [ ( Wall PosX
               , Physics.plane
@@ -135,6 +149,9 @@ init { initialSeed, width, height } =
                 ++ fl3.bodies
                 ++ fl4.bodies
                 ++ fl5.bodies
+                ++ fl6.bodies
+                ++ fl7.bodies
+                ++ fl8.bodies
       , contacts = Physics.emptyContacts
       , timestep = initTimestep
       , floors =
@@ -143,9 +160,12 @@ init { initialSeed, width, height } =
             , fl3.mesh
             , fl4.mesh
             , fl5.mesh
+            , fl6.mesh
+            , fl7.mesh
+            , fl8.mesh
             ]
-      , floorCount = fl5.floorCount
-      , seed = fl5.seed
+      , floorCount = fl8.floorCount
+      , seed = fl8.seed
       , width = width
       , height = height
       , keysDown = Set.empty
@@ -202,14 +222,19 @@ floorTrisToMesh tris =
 
 maxExtent : Float
 maxExtent =
-    2.5
+    1.5
+
+
+intExtent : Int
+intExtent =
+    floor maxExtent
 
 
 nextHole : Random.Generator ( Int, Int )
 nextHole =
     Random.map2 Tuple.pair
-        (Random.int -2 2)
-        (Random.int -2 2)
+        (Random.int -intExtent intExtent)
+        (Random.int -intExtent intExtent)
 
 
 initTimestep : Timestep
@@ -274,7 +299,7 @@ floorToTris floor =
 generateFloor : Float -> ( Int, Int ) -> Floor
 generateFloor zOffset ( holeX, holeY ) =
     { leftOfHole =
-        if holeY < 2 then
+        if holeY < intExtent then
             [ Point3d.meters -maxExtent maxExtent zOffset
             , Point3d.meters -maxExtent (toFloat holeY + 0.5) zOffset
             , Point3d.meters maxExtent (toFloat holeY + 0.5) zOffset
@@ -284,7 +309,7 @@ generateFloor zOffset ( holeX, holeY ) =
         else
             []
     , rightOfHole =
-        if holeY > -2 then
+        if holeY > -intExtent then
             [ Point3d.meters -maxExtent (toFloat holeY - 0.5) zOffset
             , Point3d.meters -maxExtent -maxExtent zOffset
             , Point3d.meters maxExtent -maxExtent zOffset
@@ -294,7 +319,7 @@ generateFloor zOffset ( holeX, holeY ) =
         else
             []
     , forwardOfHole =
-        if holeX < 2 then
+        if holeX < intExtent then
             [ Point3d.meters (toFloat holeX + 0.5) (toFloat holeY + 0.5) zOffset
             , Point3d.meters (toFloat holeX + 0.5) (toFloat holeY + -0.5) zOffset
             , Point3d.meters maxExtent (toFloat holeY + -0.5) zOffset
@@ -304,7 +329,7 @@ generateFloor zOffset ( holeX, holeY ) =
         else
             []
     , backwardOfHole =
-        if holeX > -2 then
+        if holeX > -intExtent then
             [ Point3d.meters -maxExtent (toFloat holeY + 0.5) zOffset
             , Point3d.meters -maxExtent (toFloat holeY + -0.5) zOffset
             , Point3d.meters (toFloat holeX - 0.5) (toFloat holeY + -0.5) zOffset
@@ -366,7 +391,7 @@ update msg model =
 
 maxFloors : Int
 maxFloors =
-    5
+    8
 
 
 updateFloors : Model -> Model
@@ -548,7 +573,9 @@ view3d model =
         , sunlightDirection =
             Direction3d.negativeZ
                 |> Direction3d.rotateAround Direction3d.x
-                    (Angle.degrees -30)
+                    (Angle.degrees -60)
+                |> Direction3d.rotateAround Direction3d.z
+                    (Angle.degrees -45)
         , shadows = True
         , dimensions = ( Pixels.int model.width, Pixels.int model.height )
         , camera =
@@ -559,57 +586,60 @@ view3d model =
         , clipDepth = Length.millimeters 2
         , background = Scene3d.backgroundColor Color.black
         , entities =
-            Scene3d.sphereWithShadow
+            [ Scene3d.sphereWithShadow
                 (Scene3d.Material.matte Color.green)
                 (Sphere3d.placeIn (Physics.frame model.player)
                     playerSphere
                 )
-                :: List.map
-                    (\( id, body ) ->
-                        case id of
-                            Ball ->
-                                Scene3d.nothing
-
-                            Wall PosX ->
-                                -- Scene3d.quadWithShadow
-                                --     (Scene3d.Material.matte Color.gray)
-                                --     (Point3d.meters maxExtent maxExtent -800)
-                                --     (Point3d.meters maxExtent -maxExtent -800)
-                                --     (Point3d.meters maxExtent -maxExtent 10)
-                                --     (Point3d.meters maxExtent maxExtent 10)
-                                Scene3d.nothing
-
-                            Wall NegX ->
-                                Scene3d.quadWithShadow
-                                    (Scene3d.Material.matte Color.gray)
-                                    (Point3d.meters -maxExtent maxExtent -800)
-                                    (Point3d.meters -maxExtent -maxExtent -800)
-                                    (Point3d.meters -maxExtent -maxExtent 10)
-                                    (Point3d.meters -maxExtent maxExtent 10)
-
-                            Wall PosY ->
-                                -- Scene3d.quadWithShadow
-                                --     (Scene3d.Material.matte Color.gray)
-                                --     (Point3d.meters -maxExtent maxExtent -800)
-                                --     (Point3d.meters maxExtent maxExtent -800)
-                                --     (Point3d.meters maxExtent maxExtent 10)
-                                --     (Point3d.meters -maxExtent maxExtent 10)
-                                Scene3d.nothing
-
-                            Wall NegY ->
-                                Scene3d.quadWithShadow
-                                    (Scene3d.Material.matte Color.gray)
-                                    (Point3d.meters -maxExtent -maxExtent -800)
-                                    (Point3d.meters maxExtent -maxExtent -800)
-                                    (Point3d.meters maxExtent -maxExtent 10)
-                                    (Point3d.meters -maxExtent -maxExtent 10)
-
-                            FloorPiece _ ->
-                                Scene3d.nothing
-                    )
-                    model.bodies
+            , wallPosX
+            , wallNegX
+            , wallPosY
+            , wallNegY
+            ]
                 ++ List.map viewFloor model.floors
         }
+
+
+wallPosX : Scene3d.Entity Physics.WorldCoordinates
+wallPosX =
+    -- Scene3d.quadWithShadow
+    --     (Scene3d.Material.matte (Color.rgba 0.3 0.3 1 0.4))
+    --     (Point3d.meters (maxExtent + 0.01) (maxExtent + 0.01) -800)
+    --     (Point3d.meters (maxExtent + 0.01) (-maxExtent - 0.01) -800)
+    --     (Point3d.meters (maxExtent + 0.01) (-maxExtent - 0.01) 10)
+    --     (Point3d.meters (maxExtent + 0.01) (maxExtent + 0.01) 10)
+    Scene3d.nothing
+
+
+wallNegX : Scene3d.Entity Physics.WorldCoordinates
+wallNegX =
+    Scene3d.quadWithShadow
+        (Scene3d.Material.matte Color.gray)
+        (Point3d.meters (-maxExtent - 0.01) (maxExtent + 0.01) -800)
+        (Point3d.meters (-maxExtent - 0.01) (-maxExtent - 0.01) -800)
+        (Point3d.meters (-maxExtent - 0.01) (-maxExtent - 0.01) 10)
+        (Point3d.meters (-maxExtent - 0.01) (maxExtent + 0.01) 10)
+
+
+wallPosY : Scene3d.Entity Physics.WorldCoordinates
+wallPosY =
+    -- Scene3d.quadWithShadow
+    --     (Scene3d.Material.matte (Color.rgba 0.3 0.3 1 0.4))
+    --     (Point3d.meters (-maxExtent - 0.01) (maxExtent + 0.01) -800)
+    --     (Point3d.meters (maxExtent + 0.01) (maxExtent + 0.01) -800)
+    --     (Point3d.meters (maxExtent + 0.01) (maxExtent + 0.01) 10)
+    --     (Point3d.meters (-maxExtent - 0.01) (maxExtent + 0.01) 10)
+    Scene3d.nothing
+
+
+wallNegY : Scene3d.Entity Physics.WorldCoordinates
+wallNegY =
+    Scene3d.quadWithShadow
+        (Scene3d.Material.matte Color.gray)
+        (Point3d.meters (-maxExtent - 0.01) (-maxExtent - 0.01) -800)
+        (Point3d.meters (maxExtent + 0.01) (-maxExtent - 0.01) -800)
+        (Point3d.meters (maxExtent + 0.01) (-maxExtent - 0.01) 10)
+        (Point3d.meters (-maxExtent - 0.01) (-maxExtent - 0.01) 10)
 
 
 viewFloor : ( Scene3d.Mesh.Uniform Physics.BodyCoordinates, Scene3d.Mesh.Shadow Physics.BodyCoordinates ) -> Scene3d.Entity Physics.WorldCoordinates
