@@ -54,7 +54,8 @@ type Side
 
 
 type alias Model =
-    { bodies : List ( Id, Physics.Body )
+    { player : Physics.Body
+    , bodies : List ( Id, Physics.Body )
     , contacts : Physics.Contacts Id
     , timestep : Timestep
     , floors : List ( Scene3d.Mesh.Uniform Physics.BodyCoordinates, Scene3d.Mesh.Shadow Physics.BodyCoordinates )
@@ -93,25 +94,24 @@ init initialSeed =
         floor3Tris =
             floorToTris floor3
     in
-    ( { bodies =
-            [ ( Ball
-              , Physics.sphere
-                    playerSphere
-                    Physics.Material.wood
-                    |> Physics.translateBy (Vector3d.meters 0 0 2)
-              )
-            , ( Wall PosX
+    ( { player =
+            Physics.sphere
+                playerSphere
+                Physics.Material.wood
+                |> Physics.translateBy (Vector3d.meters 0 0 2)
+      , bodies =
+            [ ( Wall PosX
               , Physics.plane
                     (Plane3d.yz
                         |> Plane3d.flip
-                        |> Plane3d.translateBy (Vector3d.meters 2.5 0 0)
+                        |> Plane3d.translateBy (Vector3d.meters maxExtent 0 0)
                     )
                     Physics.Material.wood
               )
             , ( Wall NegX
               , Physics.plane
                     (Plane3d.yz
-                        |> Plane3d.translateBy (Vector3d.meters -2.5 0 0)
+                        |> Plane3d.translateBy (Vector3d.meters -maxExtent 0 0)
                     )
                     Physics.Material.wood
               )
@@ -119,14 +119,14 @@ init initialSeed =
               , Physics.plane
                     (Plane3d.zx
                         |> Plane3d.flip
-                        |> Plane3d.translateBy (Vector3d.meters 0 2.5 0)
+                        |> Plane3d.translateBy (Vector3d.meters 0 maxExtent 0)
                     )
                     Physics.Material.wood
               )
             , ( Wall NegY
               , Physics.plane
                     (Plane3d.zx
-                        |> Plane3d.translateBy (Vector3d.meters 0 -2.5 0)
+                        |> Plane3d.translateBy (Vector3d.meters 0 -maxExtent 0)
                     )
                     Physics.Material.wood
               )
@@ -160,6 +160,11 @@ floorTrisToMesh tris =
     ( mesh
     , Scene3d.Mesh.shadow mesh
     )
+
+
+maxExtent : Float
+maxExtent =
+    2.5
 
 
 nextHole : Random.Generator ( Int, Int )
@@ -232,20 +237,20 @@ generateFloor : Float -> ( Int, Int ) -> Floor
 generateFloor zOffset ( holeX, holeY ) =
     { leftOfHole =
         if holeY < 2 then
-            [ Point3d.meters -2.5 2.5 zOffset
-            , Point3d.meters -2.5 (toFloat holeY + 0.5) zOffset
-            , Point3d.meters 2.5 (toFloat holeY + 0.5) zOffset
-            , Point3d.meters 2.5 2.5 zOffset
+            [ Point3d.meters -maxExtent maxExtent zOffset
+            , Point3d.meters -maxExtent (toFloat holeY + 0.5) zOffset
+            , Point3d.meters maxExtent (toFloat holeY + 0.5) zOffset
+            , Point3d.meters maxExtent maxExtent zOffset
             ]
 
         else
             []
     , rightOfHole =
         if holeY > -2 then
-            [ Point3d.meters -2.5 (toFloat holeY - 0.5) zOffset
-            , Point3d.meters -2.5 -2.5 zOffset
-            , Point3d.meters 2.5 -2.5 zOffset
-            , Point3d.meters 2.5 (toFloat holeY - 0.5) zOffset
+            [ Point3d.meters -maxExtent (toFloat holeY - 0.5) zOffset
+            , Point3d.meters -maxExtent -maxExtent zOffset
+            , Point3d.meters maxExtent -maxExtent zOffset
+            , Point3d.meters maxExtent (toFloat holeY - 0.5) zOffset
             ]
 
         else
@@ -254,16 +259,16 @@ generateFloor zOffset ( holeX, holeY ) =
         if holeX < 2 then
             [ Point3d.meters (toFloat holeX + 0.5) (toFloat holeY + 0.5) zOffset
             , Point3d.meters (toFloat holeX + 0.5) (toFloat holeY + -0.5) zOffset
-            , Point3d.meters 2.5 (toFloat holeY + -0.5) zOffset
-            , Point3d.meters 2.5 (toFloat holeY + 0.5) zOffset
+            , Point3d.meters maxExtent (toFloat holeY + -0.5) zOffset
+            , Point3d.meters maxExtent (toFloat holeY + 0.5) zOffset
             ]
 
         else
             []
     , backwardOfHole =
         if holeX > -2 then
-            [ Point3d.meters -2.5 (toFloat holeY + 0.5) zOffset
-            , Point3d.meters -2.5 (toFloat holeY + -0.5) zOffset
+            [ Point3d.meters -maxExtent (toFloat holeY + 0.5) zOffset
+            , Point3d.meters -maxExtent (toFloat holeY + -0.5) zOffset
             , Point3d.meters (toFloat holeX - 0.5) (toFloat holeY + -0.5) zOffset
             , Point3d.meters (toFloat holeX - 0.5) (toFloat holeY + 0.5) zOffset
             ]
@@ -322,90 +327,111 @@ simulateStep model =
                     | contacts = model.contacts
                     , duration = Timestep.duration model.timestep
                 }
-                (List.map
-                    (\( id, body ) ->
-                        ( id
-                        , if id == Ball then
-                            let
-                                applyForward =
-                                    Set.member "ArrowUp" model.keysDown || Set.member "w" model.keysDown
-
-                                applyBackward =
-                                    Set.member "ArrowDown" model.keysDown || Set.member "s" model.keysDown
-
-                                applyLeft =
-                                    Set.member "ArrowLeft" model.keysDown || Set.member "a" model.keysDown
-
-                                applyRight =
-                                    Set.member "ArrowRight" model.keysDown || Set.member "d" model.keysDown
-                            in
-                            if applyForward || applyBackward || applyLeft || applyRight then
-                                let
-                                    cameraFrame =
-                                        Physics.frame body
-                                            |> Frame3d.originPoint
-                                            |> camera
-                                            |> Camera3d.frame
-
-                                    verticalParts =
-                                        if applyForward && applyBackward then
-                                            { x = 0, y = 0, z = 0 }
-
-                                        else if applyForward then
-                                            cameraFrame
-                                                |> Frame3d.xDirection
-                                                |> Direction3d.unwrap
-                                                |> (\p -> { x = -p.x, y = -p.y, z = 0 })
-
-                                        else if applyBackward then
-                                            cameraFrame
-                                                |> Frame3d.xDirection
-                                                |> Direction3d.unwrap
-
-                                        else
-                                            { x = 0, y = 0, z = 0 }
-
-                                    horizontalParts =
-                                        if applyLeft && applyRight then
-                                            { x = 0, y = 0, z = 0 }
-
-                                        else if applyLeft then
-                                            cameraFrame
-                                                |> Frame3d.yDirection
-                                                |> Direction3d.unwrap
-                                                |> (\p -> { x = -p.x, y = -p.y, z = 0 })
-
-                                        else if applyRight then
-                                            cameraFrame
-                                                |> Frame3d.yDirection
-                                                |> Direction3d.unwrap
-
-                                        else
-                                            { x = 0, y = 0, z = 0 }
-                                in
-                                Physics.applyTorque
-                                    (Vector3d.withLength
-                                        (Torque.newtonMeters 150)
-                                        (Direction3d.unsafe
-                                            { x = verticalParts.x + horizontalParts.x
-                                            , y = verticalParts.y + horizontalParts.y
-                                            , z = 0
-                                            }
-                                        )
-                                    )
-                                    body
-
-                            else
-                                body
-
-                          else
-                            body
-                        )
-                    )
-                    model.bodies
+                (( Ball, updatePlayerBall model.keysDown model.player )
+                    :: model.bodies
                 )
+
+        ( player, bodies ) =
+            extractPlayer model.player newBodies
     in
-    { model | bodies = newBodies, contacts = newContacts }
+    { model
+        | player = player
+        , bodies = bodies
+        , contacts = newContacts
+    }
+
+
+extractPlayer : Physics.Body -> List ( Id, Physics.Body ) -> ( Physics.Body, List ( Id, Physics.Body ) )
+extractPlayer defaultPlayer =
+    extractPlayerHelper defaultPlayer []
+
+
+extractPlayerHelper : Physics.Body -> List ( Id, Physics.Body ) -> List ( Id, Physics.Body ) -> ( Physics.Body, List ( Id, Physics.Body ) )
+extractPlayerHelper defaultPlayer searched toSearch =
+    case toSearch of
+        [] ->
+            ( defaultPlayer, searched )
+
+        (( id, body ) as next) :: rest ->
+            if id == Ball then
+                ( body, searched ++ rest )
+
+            else
+                extractPlayerHelper defaultPlayer (next :: searched) rest
+
+
+updatePlayerBall keysDown body =
+    let
+        applyForward =
+            Set.member "ArrowUp" keysDown || Set.member "w" keysDown
+
+        applyBackward =
+            Set.member "ArrowDown" keysDown || Set.member "s" keysDown
+
+        applyLeft =
+            Set.member "ArrowLeft" keysDown || Set.member "a" keysDown
+
+        applyRight =
+            Set.member "ArrowRight" keysDown || Set.member "d" keysDown
+    in
+    if applyForward || applyBackward || applyLeft || applyRight then
+        let
+            cameraFrame =
+                Physics.frame body
+                    |> Frame3d.originPoint
+                    |> camera
+                    |> Camera3d.frame
+
+            verticalParts =
+                if applyForward && applyBackward then
+                    { x = 0, y = 0, z = 0 }
+
+                else if applyForward then
+                    cameraFrame
+                        |> Frame3d.xDirection
+                        |> Direction3d.unwrap
+                        |> (\p -> { x = -p.x, y = -p.y, z = 0 })
+
+                else if applyBackward then
+                    cameraFrame
+                        |> Frame3d.xDirection
+                        |> Direction3d.unwrap
+
+                else
+                    { x = 0, y = 0, z = 0 }
+
+            horizontalParts =
+                if applyLeft && applyRight then
+                    { x = 0, y = 0, z = 0 }
+
+                else if applyLeft then
+                    cameraFrame
+                        |> Frame3d.yDirection
+                        |> Direction3d.unwrap
+                        |> (\p -> { x = -p.x, y = -p.y, z = 0 })
+
+                else if applyRight then
+                    cameraFrame
+                        |> Frame3d.yDirection
+                        |> Direction3d.unwrap
+
+                else
+                    { x = 0, y = 0, z = 0 }
+        in
+        Physics.applyTorque
+            (Vector3d.withLength
+                (Torque.newtonMeters 150)
+                (Direction3d.unsafe
+                    { x = verticalParts.x + horizontalParts.x
+                    , y = verticalParts.y + horizontalParts.y
+                    , z = 0
+                    }
+                )
+            )
+            body
+
+    else
+        body
 
 
 view : Model -> Browser.Document Msg
@@ -430,63 +456,62 @@ view3d model =
         , shadows = True
         , dimensions = ( Pixels.int 800, Pixels.int 600 )
         , camera =
-            model.bodies
-                |> List.filter (\( id, _ ) -> id == Ball)
-                |> List.head
-                |> Maybe.map (\( _, body ) -> Physics.frame body |> Frame3d.originPoint)
-                |> Maybe.withDefault (Point3d.meters 0 0 0)
+            model.player
+                |> Physics.frame
+                |> Frame3d.originPoint
                 |> camera
         , clipDepth = Length.millimeters 2
         , background = Scene3d.backgroundColor Color.black
         , entities =
-            List.map
-                (\( id, body ) ->
-                    case id of
-                        Ball ->
-                            Scene3d.sphereWithShadow
-                                (Scene3d.Material.matte Color.green)
-                                (Sphere3d.placeIn (Physics.frame body)
-                                    playerSphere
-                                )
-
-                        Wall PosX ->
-                            -- Scene3d.quadWithShadow
-                            --     (Scene3d.Material.matte Color.gray)
-                            --     (Point3d.meters 2.5 2.5 -800)
-                            --     (Point3d.meters 2.5 -2.5 -800)
-                            --     (Point3d.meters 2.5 -2.5 10)
-                            --     (Point3d.meters 2.5 2.5 10)
-                            Scene3d.nothing
-
-                        Wall NegX ->
-                            Scene3d.quadWithShadow
-                                (Scene3d.Material.matte Color.gray)
-                                (Point3d.meters -2.5 2.5 -800)
-                                (Point3d.meters -2.5 -2.5 -800)
-                                (Point3d.meters -2.5 -2.5 10)
-                                (Point3d.meters -2.5 2.5 10)
-
-                        Wall PosY ->
-                            -- Scene3d.quadWithShadow
-                            --     (Scene3d.Material.matte Color.gray)
-                            --     (Point3d.meters -2.5 2.5 -800)
-                            --     (Point3d.meters 2.5 2.5 -800)
-                            --     (Point3d.meters 2.5 2.5 10)
-                            --     (Point3d.meters -2.5 2.5 10)
-                            Scene3d.nothing
-
-                        Wall NegY ->
-                            Scene3d.quadWithShadow
-                                (Scene3d.Material.matte Color.gray)
-                                (Point3d.meters -2.5 -2.5 -800)
-                                (Point3d.meters 2.5 -2.5 -800)
-                                (Point3d.meters 2.5 -2.5 10)
-                                (Point3d.meters -2.5 -2.5 10)
-
-                        FloorPiece ->
-                            Scene3d.nothing
+            Scene3d.sphereWithShadow
+                (Scene3d.Material.matte Color.green)
+                (Sphere3d.placeIn (Physics.frame model.player)
+                    playerSphere
                 )
-                model.bodies
+                :: List.map
+                    (\( id, body ) ->
+                        case id of
+                            Ball ->
+                                Scene3d.nothing
+
+                            Wall PosX ->
+                                -- Scene3d.quadWithShadow
+                                --     (Scene3d.Material.matte Color.gray)
+                                --     (Point3d.meters maxExtent maxExtent -800)
+                                --     (Point3d.meters maxExtent -maxExtent -800)
+                                --     (Point3d.meters maxExtent -maxExtent 10)
+                                --     (Point3d.meters maxExtent maxExtent 10)
+                                Scene3d.nothing
+
+                            Wall NegX ->
+                                Scene3d.quadWithShadow
+                                    (Scene3d.Material.matte Color.gray)
+                                    (Point3d.meters -maxExtent maxExtent -800)
+                                    (Point3d.meters -maxExtent -maxExtent -800)
+                                    (Point3d.meters -maxExtent -maxExtent 10)
+                                    (Point3d.meters -maxExtent maxExtent 10)
+
+                            Wall PosY ->
+                                -- Scene3d.quadWithShadow
+                                --     (Scene3d.Material.matte Color.gray)
+                                --     (Point3d.meters -maxExtent maxExtent -800)
+                                --     (Point3d.meters maxExtent maxExtent -800)
+                                --     (Point3d.meters maxExtent maxExtent 10)
+                                --     (Point3d.meters -maxExtent maxExtent 10)
+                                Scene3d.nothing
+
+                            Wall NegY ->
+                                Scene3d.quadWithShadow
+                                    (Scene3d.Material.matte Color.gray)
+                                    (Point3d.meters -maxExtent -maxExtent -800)
+                                    (Point3d.meters maxExtent -maxExtent -800)
+                                    (Point3d.meters maxExtent -maxExtent 10)
+                                    (Point3d.meters -maxExtent -maxExtent 10)
+
+                            FloorPiece ->
+                                Scene3d.nothing
+                    )
+                    model.bodies
                 ++ List.map viewFloor model.floors
         }
 
