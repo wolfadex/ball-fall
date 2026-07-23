@@ -17,6 +17,7 @@ import Physics exposing (onEarth)
 import Physics.Material
 import Physics.Shape
 import Pixels
+import Plane3d exposing (Plane3d)
 import Point3d exposing (Point3d)
 import Random
 import Scene3d
@@ -43,6 +44,14 @@ main =
 type Id
     = Ball
     | FloorPiece
+    | Wall Side
+
+
+type Side
+    = PosX
+    | PosY
+    | NegX
+    | NegY
 
 
 type alias Model =
@@ -86,15 +95,46 @@ init initialSeed =
             floorToTris floor3
     in
     ( { bodies =
-            ( Ball
-            , Physics.sphere
-                playerSphere
-                Physics.Material.wood
-                |> Physics.translateBy (Vector3d.meters 0 0 2)
-            )
-                :: List.map floorMeshToBody floor1Tris
-                ++ List.map floorMeshToBody floor2Tris
-                ++ List.map floorMeshToBody floor3Tris
+            [ ( Ball
+              , Physics.sphere
+                    playerSphere
+                    Physics.Material.wood
+                    |> Physics.translateBy (Vector3d.meters 0 0 2)
+              )
+            , ( Wall PosX
+              , Physics.plane
+                    (Plane3d.yz
+                        |> Plane3d.flip
+                        |> Plane3d.translateBy (Vector3d.meters 2.5 0 0)
+                    )
+                    Physics.Material.wood
+              )
+            , ( Wall NegX
+              , Physics.plane
+                    (Plane3d.yz
+                        |> Plane3d.translateBy (Vector3d.meters -2.5 0 0)
+                    )
+                    Physics.Material.wood
+              )
+            , ( Wall PosY
+              , Physics.plane
+                    (Plane3d.zx
+                        |> Plane3d.flip
+                        |> Plane3d.translateBy (Vector3d.meters 0 2.5 0)
+                    )
+                    Physics.Material.wood
+              )
+            , ( Wall NegY
+              , Physics.plane
+                    (Plane3d.zx
+                        |> Plane3d.translateBy (Vector3d.meters 0 -2.5 0)
+                    )
+                    Physics.Material.wood
+              )
+            ]
+                ++ List.map floorTrisToBody floor1Tris
+                ++ List.map floorTrisToBody floor2Tris
+                ++ List.map floorTrisToBody floor3Tris
       , contacts = Physics.emptyContacts
       , timestep = initTimestep
       , floors =
@@ -116,6 +156,7 @@ floorTrisToMesh tris =
             tris
                 |> TriangularMesh.combine
                 |> Scene3d.Mesh.indexedFacets
+                |> Scene3d.Mesh.cullBackFaces
     in
     ( mesh
     , Scene3d.Mesh.shadow mesh
@@ -149,8 +190,8 @@ type alias Floor =
     }
 
 
-floorMeshToBody : TriangularMesh Vert -> ( Id, Physics.Body )
-floorMeshToBody floorMesh =
+floorTrisToBody : TriangularMesh Vert -> ( Id, Physics.Body )
+floorTrisToBody floorMesh =
     ( FloorPiece
     , Physics.static
         [ ( Physics.Shape.unsafeConvex
@@ -462,7 +503,10 @@ view3d : Model -> Html Msg
 view3d model =
     Scene3d.sunny
         { upDirection = Direction3d.z
-        , sunlightDirection = Direction3d.negativeZ
+        , sunlightDirection =
+            Direction3d.negativeZ
+                |> Direction3d.rotateAround Direction3d.x
+                    (Angle.degrees -30)
         , shadows = True
         , dimensions = ( Pixels.int 800, Pixels.int 600 )
         , camera =
@@ -475,25 +519,6 @@ view3d model =
         , clipDepth = Length.millimeters 2
         , background = Scene3d.backgroundColor Color.black
         , entities =
-            -- Scene3d.lineSegment
-            --     (Scene3d.Material.color Color.red)
-            --     (LineSegment3d.from
-            --         (Point3d.meters 0 0 1)
-            --         (Point3d.meters 2 0 1)
-            --     )
-            --     :: Scene3d.lineSegment
-            --         (Scene3d.Material.color Color.green)
-            --         (LineSegment3d.from
-            --             (Point3d.meters 0 0 1)
-            --             (Point3d.meters 0 2 1)
-            --         )
-            --     :: Scene3d.lineSegment
-            --         (Scene3d.Material.color Color.blue)
-            --         (LineSegment3d.from
-            --             (Point3d.meters 0 0 1)
-            --             (Point3d.meters 0 0 3)
-            --         )
-            --     ::
             List.map
                 (\( id, body ) ->
                     case id of
@@ -503,6 +528,40 @@ view3d model =
                                 (Sphere3d.placeIn (Physics.frame body)
                                     playerSphere
                                 )
+
+                        Wall PosX ->
+                            -- Scene3d.quadWithShadow
+                            --     (Scene3d.Material.matte Color.gray)
+                            --     (Point3d.meters 2.5 2.5 -800)
+                            --     (Point3d.meters 2.5 -2.5 -800)
+                            --     (Point3d.meters 2.5 -2.5 10)
+                            --     (Point3d.meters 2.5 2.5 10)
+                            Scene3d.nothing
+
+                        Wall NegX ->
+                            Scene3d.quadWithShadow
+                                (Scene3d.Material.matte Color.gray)
+                                (Point3d.meters -2.5 2.5 -800)
+                                (Point3d.meters -2.5 -2.5 -800)
+                                (Point3d.meters -2.5 -2.5 10)
+                                (Point3d.meters -2.5 2.5 10)
+
+                        Wall PosY ->
+                            -- Scene3d.quadWithShadow
+                            --     (Scene3d.Material.matte Color.gray)
+                            --     (Point3d.meters -2.5 2.5 -800)
+                            --     (Point3d.meters 2.5 2.5 -800)
+                            --     (Point3d.meters 2.5 2.5 10)
+                            --     (Point3d.meters -2.5 2.5 10)
+                            Scene3d.nothing
+
+                        Wall NegY ->
+                            Scene3d.quadWithShadow
+                                (Scene3d.Material.matte Color.gray)
+                                (Point3d.meters -2.5 -2.5 -800)
+                                (Point3d.meters 2.5 -2.5 -800)
+                                (Point3d.meters 2.5 -2.5 10)
+                                (Point3d.meters -2.5 -2.5 10)
 
                         FloorPiece ->
                             Scene3d.nothing
