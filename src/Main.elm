@@ -50,7 +50,7 @@ type alias Flags =
 
 type Id
     = Ball
-    | FloorPiece
+    | FloorPiece Int
     | Wall Side
 
 
@@ -70,6 +70,7 @@ type alias Model =
     , seed : Random.Seed
     , width : Int
     , height : Int
+    , floorCount : Int
     , keysDown : Set String
     }
 
@@ -77,32 +78,20 @@ type alias Model =
 init : Flags -> ( Model, Cmd Msg )
 init { initialSeed, width, height } =
     let
-        ( ( firstHole, secondHole, thirdHole ), seed ) =
-            Random.step
-                (Random.map3 (\one two three -> ( one, two, three ))
-                    nextHole
-                    nextHole
-                    nextHole
-                )
-                (Random.initialSeed initialSeed)
+        fl1 =
+            nextFloor 0 (Random.initialSeed initialSeed)
 
-        floor1 =
-            generateFloor 0 firstHole
+        fl2 =
+            nextFloor fl1.floorCount fl1.seed
 
-        floor1Tris =
-            floorToTris floor1
+        fl3 =
+            nextFloor fl2.floorCount fl2.seed
 
-        floor2 =
-            generateFloor -3 secondHole
+        fl4 =
+            nextFloor fl3.floorCount fl3.seed
 
-        floor2Tris =
-            floorToTris floor2
-
-        floor3 =
-            generateFloor -6 thirdHole
-
-        floor3Tris =
-            floorToTris floor3
+        fl5 =
+            nextFloor fl4.floorCount fl4.seed
     in
     ( { player =
             Physics.sphere
@@ -141,23 +130,60 @@ init { initialSeed, width, height } =
                     Physics.Material.wood
               )
             ]
-                ++ List.map floorTrisToBody floor1Tris
-                ++ List.map floorTrisToBody floor2Tris
-                ++ List.map floorTrisToBody floor3Tris
+                ++ fl1.bodies
+                ++ fl2.bodies
+                ++ fl3.bodies
+                ++ fl4.bodies
+                ++ fl5.bodies
       , contacts = Physics.emptyContacts
       , timestep = initTimestep
       , floors =
-            [ floorTrisToMesh floor1Tris
-            , floorTrisToMesh floor2Tris
-            , floorTrisToMesh floor3Tris
+            [ fl1.mesh
+            , fl2.mesh
+            , fl3.mesh
+            , fl4.mesh
+            , fl5.mesh
             ]
-      , seed = seed
+      , floorCount = fl5.floorCount
+      , seed = fl5.seed
       , width = width
       , height = height
       , keysDown = Set.empty
       }
     , Cmd.none
     )
+
+
+nextFloor :
+    Int
+    -> Random.Seed
+    ->
+        { mesh : ( Scene3d.Mesh.Uniform Physics.BodyCoordinates, Scene3d.Mesh.Shadow Physics.BodyCoordinates )
+        , bodies : List ( Id, Physics.Body )
+        , floorCount : Int
+        , seed : Random.Seed
+        }
+nextFloor floorCount seed =
+    let
+        ( hole, nextSeed ) =
+            Random.step nextHole seed
+
+        floor =
+            generateFloor (toFloat floorCount * floorSpacing) hole
+
+        floorTris =
+            floorToTris floor
+    in
+    { mesh = floorTrisToMesh floorTris
+    , bodies = List.map (floorTrisToBody floorCount) floorTris
+    , floorCount = floorCount + 1
+    , seed = nextSeed
+    }
+
+
+floorSpacing : Float
+floorSpacing =
+    -3
 
 
 floorTrisToMesh : List (TriangularMesh Vert) -> ( Scene3d.Mesh.Uniform Physics.BodyCoordinates, Scene3d.Mesh.Shadow Physics.BodyCoordinates )
@@ -206,9 +232,9 @@ type alias Floor =
     }
 
 
-floorTrisToBody : TriangularMesh Vert -> ( Id, Physics.Body )
-floorTrisToBody floorMesh =
-    ( FloorPiece
+floorTrisToBody : Int -> TriangularMesh Vert -> ( Id, Physics.Body )
+floorTrisToBody floorNumber floorMesh =
+    ( FloorPiece floorNumber
     , Physics.static
         [ ( Physics.Shape.unsafeConvex
                 floorMesh
@@ -326,13 +352,57 @@ update msg model =
             ( { model | width = width, height = height }, Cmd.none )
 
         Tick delta ->
-            ( Timestep.advance simulateStep delta model, Cmd.none )
+            ( Timestep.advance simulateStep delta model
+                |> updateFloors
+            , Cmd.none
+            )
 
         KeyDown key ->
             ( { model | keysDown = Set.insert key model.keysDown }, Cmd.none )
 
         KeyUp key ->
             ( { model | keysDown = Set.remove key model.keysDown }, Cmd.none )
+
+
+maxFloors : Int
+maxFloors =
+    5
+
+
+updateFloors : Model -> Model
+updateFloors model =
+    if Length.inMeters (Point3d.zCoordinate (Frame3d.originPoint (Physics.frame model.player))) < (toFloat (model.floorCount - maxFloors) * floorSpacing) then
+        let
+            newFloor =
+                nextFloor model.floorCount model.seed
+                    |> Debug.log "floor swap"
+        in
+        { model
+            | seed = newFloor.seed
+            , floorCount = newFloor.floorCount
+            , floors =
+                case model.floors of
+                    [] ->
+                        model.floors
+
+                    _ :: restFloors ->
+                        restFloors ++ [ newFloor.mesh ]
+            , bodies =
+                newFloor.bodies
+                    ++ List.filter
+                        (\( id, _ ) ->
+                            case id of
+                                FloorPiece height ->
+                                    height > (model.floorCount - maxFloors)
+
+                                _ ->
+                                    True
+                        )
+                        model.bodies
+        }
+
+    else
+        model
 
 
 simulateStep : Model -> Model
@@ -534,7 +604,7 @@ view3d model =
                                     (Point3d.meters maxExtent -maxExtent 10)
                                     (Point3d.meters -maxExtent -maxExtent 10)
 
-                            FloorPiece ->
+                            FloorPiece _ ->
                                 Scene3d.nothing
                     )
                     model.bodies
