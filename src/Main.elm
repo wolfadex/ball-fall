@@ -1,6 +1,7 @@
 module Main exposing (main)
 
 import Angle
+import Array exposing (Array)
 import Block3d
 import Browser
 import Browser.Events
@@ -16,13 +17,15 @@ import Physics exposing (onEarth)
 import Physics.Material
 import Physics.Shape
 import Pixels
-import Point3d
+import Point3d exposing (Point3d)
 import Scene3d
 import Scene3d.Material
+import Scene3d.Mesh
 import Set exposing (Set)
 import Sphere3d exposing (Sphere3d)
 import Timestep exposing (Timestep)
 import Torque
+import TriangularMesh exposing (TriangularMesh)
 import Vector3d
 
 
@@ -38,19 +41,27 @@ main =
 
 type Id
     = Ball
-    | Block
+    | FloorPiece
 
 
 type alias Model =
     { bodies : List ( Id, Physics.Body )
     , contacts : Physics.Contacts Id
     , timestep : Timestep
+    , floors : List ( Scene3d.Mesh.Uniform Physics.BodyCoordinates, Scene3d.Mesh.Shadow Physics.BodyCoordinates )
     , keysDown : Set String
     }
 
 
 init : () -> ( Model, Cmd Msg )
 init () =
+    let
+        floor =
+            generateFloor ( 1, -1 )
+
+        floorMeshes =
+            floorToMeshes floor
+    in
     ( { bodies =
             ( Ball
             , Physics.sphere
@@ -58,9 +69,21 @@ init () =
                 Physics.Material.wood
                 |> Physics.translateBy (Vector3d.meters 0 0 2)
             )
-                :: genFloor
+                :: List.map floorMeshToBody floorMeshes
       , contacts = Physics.emptyContacts
       , timestep = initTimestep
+      , floors =
+            List.map
+                (\tris ->
+                    let
+                        mesh =
+                            Scene3d.Mesh.indexedFacets tris
+                    in
+                    ( mesh
+                    , Scene3d.Mesh.shadow mesh
+                    )
+                )
+                floorMeshes
       , keysDown = Set.empty
       }
     , Cmd.none
@@ -75,73 +98,172 @@ initTimestep =
         }
 
 
-genFloor : List ( Id, Physics.Body )
-genFloor =
-    List.map (Tuple.pair Block)
-        [ Physics.static
-            [ ( Physics.Shape.block
-                    basicBlock
-              , Physics.Material.wood
-              )
-            ]
-            |> Physics.translateBy (Vector3d.meters 0 0 0)
-        , Physics.static
-            [ ( Physics.Shape.block
-                    basicBlock
-              , Physics.Material.wood
-              )
-            ]
-            |> Physics.translateBy (Vector3d.meters 1 0 0)
-        , Physics.static
-            [ ( Physics.Shape.block
-                    basicBlock
-              , Physics.Material.wood
-              )
-            ]
-            |> Physics.translateBy (Vector3d.meters 0 1 0)
-        , Physics.static
-            [ ( Physics.Shape.block
-                    basicBlock
-              , Physics.Material.wood
-              )
-            ]
-            |> Physics.translateBy (Vector3d.meters -1 0 0)
-        , Physics.static
-            [ ( Physics.Shape.block
-                    basicBlock
-              , Physics.Material.wood
-              )
-            ]
-            |> Physics.translateBy (Vector3d.meters 0 -1 0)
-        , Physics.static
-            [ ( Physics.Shape.block
-                    basicBlock
-              , Physics.Material.wood
-              )
-            ]
-            |> Physics.translateBy (Vector3d.meters 1 1 0)
-        , Physics.static
-            [ ( Physics.Shape.block
-                    basicBlock
-              , Physics.Material.wood
-              )
-            ]
-            |> Physics.translateBy (Vector3d.meters -1 -1 0)
-        , Physics.static
-            [ ( Physics.Shape.block
-                    basicBlock
-              , Physics.Material.wood
-              )
-            ]
-            |> Physics.translateBy (Vector3d.meters 1 -1 0)
-        , Physics.static
-            [ ( Physics.Shape.block
-                    basicBlock
-              , Physics.Material.wood
-              )
-            ]
-            |> Physics.translateBy (Vector3d.meters -1 1 0)
+type alias Vert =
+    Point3d Length.Meters Physics.BodyCoordinates
+
+
+type alias Floor =
+    { leftOfHole : List Vert
+    , rightOfHole : List Vert
+    , forwardOfHole : List Vert
+    , backwardOfHole : List Vert
+    }
+
+
+floorMeshToBody : TriangularMesh Vert -> ( Id, Physics.Body )
+floorMeshToBody floorMesh =
+    ( FloorPiece
+    , Physics.static
+        [ ( Physics.Shape.unsafeConvex
+                floorMesh
+          , Physics.Material.wood
+          )
         ]
+    )
+
+
+floorToMeshes : Floor -> List (TriangularMesh Vert)
+floorToMeshes floor =
+    List.map
+        (\verts ->
+            TriangularMesh.indexed
+                (Array.fromList (verts ++ List.map (Point3d.translateBy (Vector3d.meters 0 0 -0.3)) verts))
+                [ ( 0, 1, 2 )
+                , ( 0, 2, 3 )
+                , ( 4, 5, 1 )
+                , ( 4, 1, 0 )
+                , ( 7, 4, 0 )
+                , ( 7, 0, 3 )
+                , ( 5, 6, 2 )
+                , ( 5, 2, 1 )
+                , ( 6, 7, 3 )
+                , ( 6, 3, 2 )
+                , ( 7, 6, 5 )
+                , ( 7, 5, 4 )
+                ]
+        )
+        [ floor.leftOfHole
+        , floor.rightOfHole
+        , floor.forwardOfHole
+        , floor.backwardOfHole
+        ]
+
+
+{-| initially for a 5x5 grid centered on 0,0 (z is ignored for now)
+-}
+generateFloor : ( Int, Int ) -> Floor
+generateFloor ( holeX, holeY ) =
+    { leftOfHole =
+        if holeY < 2 then
+            [ Point3d.meters -2.5 2.5 0
+            , Point3d.meters -2.5 (toFloat holeY + 0.5) 0
+            , Point3d.meters 2.5 (toFloat holeY + 0.5) 0
+            , Point3d.meters 2.5 2.5 0
+            ]
+
+        else
+            []
+    , rightOfHole =
+        if holeY > -2 then
+            [ Point3d.meters -2.5 (toFloat holeY - 0.5) 0
+            , Point3d.meters -2.5 -2.5 0
+            , Point3d.meters 2.5 -2.5 0
+            , Point3d.meters 2.5 (toFloat holeY - 0.5) 0
+            ]
+
+        else
+            []
+    , forwardOfHole =
+        if holeX < 2 then
+            [ Point3d.meters (toFloat holeX + 0.5) (toFloat holeY + 0.5) 0
+            , Point3d.meters (toFloat holeX + 0.5) (toFloat holeY + -0.5) 0
+            , Point3d.meters 2.5 (toFloat holeY + -0.5) 0
+            , Point3d.meters 2.5 (toFloat holeY + 0.5) 0
+            ]
+
+        else
+            []
+    , backwardOfHole =
+        if holeX > -2 then
+            [ Point3d.meters -2.5 (toFloat holeY + 0.5) 0
+            , Point3d.meters -2.5 (toFloat holeY + -0.5) 0
+            , Point3d.meters (toFloat holeX - 0.5) (toFloat holeY + -0.5) 0
+            , Point3d.meters (toFloat holeX - 0.5) (toFloat holeY + 0.5) 0
+            ]
+
+        else
+            []
+    }
+
+
+
+-- genFloor : List ( Id, Physics.Body )
+-- genFloor =
+--     List.map (Tuple.pair Block)
+--         [ Physics.static
+--             [ ( Physics.Shape.block
+--                     basicBlock
+--               , Physics.Material.wood
+--               )
+--             ]
+--             |> Physics.translateBy (Vector3d.meters 0 0 -1)
+--         , Physics.static
+--             [ ( Physics.Shape.block
+--                     basicBlock
+--               , Physics.Material.wood
+--               )
+--             ]
+--             |> Physics.translateBy (Vector3d.meters 1 0 -1)
+--         , Physics.static
+--             [ ( Physics.Shape.block
+--                     basicBlock
+--               , Physics.Material.wood
+--               )
+--             ]
+--             |> Physics.translateBy (Vector3d.meters 0 1 -1)
+--         , Physics.static
+--             [ ( Physics.Shape.block
+--                     basicBlock
+--               , Physics.Material.wood
+--               )
+--             ]
+--             |> Physics.translateBy (Vector3d.meters -1 0 -1)
+--         , Physics.static
+--             [ ( Physics.Shape.block
+--                     basicBlock
+--               , Physics.Material.wood
+--               )
+--             ]
+--             |> Physics.translateBy (Vector3d.meters 0 -1 -1)
+--         , Physics.static
+--             [ ( Physics.Shape.block
+--                     basicBlock
+--               , Physics.Material.wood
+--               )
+--             ]
+--             |> Physics.translateBy (Vector3d.meters 1 1 -1)
+--         , Physics.static
+--             [ ( Physics.Shape.block
+--                     basicBlock
+--               , Physics.Material.wood
+--               )
+--             ]
+--             |> Physics.translateBy (Vector3d.meters -1 -1 -1)
+--         , Physics.static
+--             [ ( Physics.Shape.block
+--                     basicBlock
+--               , Physics.Material.wood
+--               )
+--             ]
+--             |> Physics.translateBy (Vector3d.meters 1 -1 -1)
+--         , Physics.static
+--             [ ( Physics.Shape.block
+--                     basicBlock
+--               , Physics.Material.wood
+--               )
+--             ]
+--             |> Physics.translateBy (Vector3d.meters -1 1 -1)
+--         ]
 
 
 basicBlock =
@@ -345,15 +467,21 @@ view3d model =
                                     playerSphere
                                 )
 
-                        Block ->
-                            Scene3d.blockWithShadow
-                                (Scene3d.Material.matte Color.white)
-                                (Block3d.placeIn (Physics.frame body)
-                                    basicBlock
-                                )
+                        FloorPiece ->
+                            Scene3d.nothing
                 )
                 model.bodies
+                ++ List.map viewFloor model.floors
         }
+
+
+viewFloor : ( Scene3d.Mesh.Uniform Physics.BodyCoordinates, Scene3d.Mesh.Shadow Physics.BodyCoordinates ) -> Scene3d.Entity Physics.WorldCoordinates
+viewFloor ( mesh, shadow ) =
+    Scene3d.meshWithShadow
+        (Scene3d.Material.matte Color.white)
+        mesh
+        shadow
+        |> Scene3d.placeIn Frame3d.atOrigin
 
 
 camera playerPosition =
