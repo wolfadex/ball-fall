@@ -1,8 +1,7 @@
-module Main exposing (main)
+module Main exposing (Id, Model, Msg, main)
 
 import Angle
-import Array exposing (Array)
-import Block3d
+import Array
 import Browser
 import Browser.Events
 import Camera3d
@@ -17,7 +16,7 @@ import Physics exposing (onEarth)
 import Physics.Material
 import Physics.Shape
 import Pixels
-import Plane3d exposing (Plane3d)
+import Plane3d
 import Point3d exposing (Point3d)
 import Random
 import Scene3d
@@ -274,85 +273,6 @@ generateFloor zOffset ( holeX, holeY ) =
     }
 
 
-
--- genFloor : List ( Id, Physics.Body )
--- genFloor =
---     List.map (Tuple.pair Block)
---         [ Physics.static
---             [ ( Physics.Shape.block
---                     basicBlock
---               , Physics.Material.wood
---               )
---             ]
---             |> Physics.translateBy (Vector3d.meters 0 0 -1)
---         , Physics.static
---             [ ( Physics.Shape.block
---                     basicBlock
---               , Physics.Material.wood
---               )
---             ]
---             |> Physics.translateBy (Vector3d.meters 1 0 -1)
---         , Physics.static
---             [ ( Physics.Shape.block
---                     basicBlock
---               , Physics.Material.wood
---               )
---             ]
---             |> Physics.translateBy (Vector3d.meters 0 1 -1)
---         , Physics.static
---             [ ( Physics.Shape.block
---                     basicBlock
---               , Physics.Material.wood
---               )
---             ]
---             |> Physics.translateBy (Vector3d.meters -1 0 -1)
---         , Physics.static
---             [ ( Physics.Shape.block
---                     basicBlock
---               , Physics.Material.wood
---               )
---             ]
---             |> Physics.translateBy (Vector3d.meters 0 -1 -1)
---         , Physics.static
---             [ ( Physics.Shape.block
---                     basicBlock
---               , Physics.Material.wood
---               )
---             ]
---             |> Physics.translateBy (Vector3d.meters 1 1 -1)
---         , Physics.static
---             [ ( Physics.Shape.block
---                     basicBlock
---               , Physics.Material.wood
---               )
---             ]
---             |> Physics.translateBy (Vector3d.meters -1 -1 -1)
---         , Physics.static
---             [ ( Physics.Shape.block
---                     basicBlock
---               , Physics.Material.wood
---               )
---             ]
---             |> Physics.translateBy (Vector3d.meters 1 -1 -1)
---         , Physics.static
---             [ ( Physics.Shape.block
---                     basicBlock
---               , Physics.Material.wood
---               )
---             ]
---             |> Physics.translateBy (Vector3d.meters -1 1 -1)
---         ]
-
-
-basicBlock =
-    Block3d.centeredOn
-        Frame3d.atOrigin
-        ( Length.meters 1
-        , Length.meters 1
-        , Length.meters 1
-        )
-
-
 playerSphere : Sphere3d Length.Meters Physics.BodyCoordinates
 playerSphere =
     Sphere3d.atPoint (Point3d.meters 0 0 0)
@@ -511,7 +431,7 @@ view3d model =
         , dimensions = ( Pixels.int 800, Pixels.int 600 )
         , camera =
             model.bodies
-                |> List.filter (\( id, body ) -> id == Ball)
+                |> List.filter (\( id, _ ) -> id == Ball)
                 |> List.head
                 |> Maybe.map (\( _, body ) -> Physics.frame body |> Frame3d.originPoint)
                 |> Maybe.withDefault (Point3d.meters 0 0 0)
@@ -580,6 +500,7 @@ viewFloor ( mesh, shadow ) =
         |> Scene3d.placeIn Frame3d.atOrigin
 
 
+camera : Point3d Length.Meters Physics.WorldCoordinates -> Camera3d.Camera3d Length.Meters Physics.WorldCoordinates
 camera playerPosition =
     Camera3d.lookAt
         { eyePoint =
