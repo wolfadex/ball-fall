@@ -6,6 +6,7 @@ import Browser
 import Browser.Events
 import Camera3d
 import Color
+import Css
 import Direction3d
 import Duration exposing (Duration)
 import Frame3d
@@ -30,7 +31,7 @@ import TriangularMesh exposing (TriangularMesh)
 import Vector3d
 
 
-main : Program Int Model Msg
+main : Program Flags Model Msg
 main =
     Browser.document
         { init = init
@@ -38,6 +39,13 @@ main =
         , update = update
         , subscriptions = subscriptions
         }
+
+
+type alias Flags =
+    { initialSeed : Int
+    , width : Int
+    , height : Int
+    }
 
 
 type Id
@@ -60,12 +68,14 @@ type alias Model =
     , timestep : Timestep
     , floors : List ( Scene3d.Mesh.Uniform Physics.BodyCoordinates, Scene3d.Mesh.Shadow Physics.BodyCoordinates )
     , seed : Random.Seed
+    , width : Int
+    , height : Int
     , keysDown : Set String
     }
 
 
-init : Int -> ( Model, Cmd Msg )
-init initialSeed =
+init : Flags -> ( Model, Cmd Msg )
+init { initialSeed, width, height } =
     let
         ( ( firstHole, secondHole, thirdHole ), seed ) =
             Random.step
@@ -142,6 +152,8 @@ init initialSeed =
             , floorTrisToMesh floor3Tris
             ]
       , seed = seed
+      , width = width
+      , height = height
       , keysDown = Set.empty
       }
     , Cmd.none
@@ -296,6 +308,7 @@ subscriptions _ =
             (Json.Decode.map KeyUp
                 (Json.Decode.field "key" Json.Decode.string)
             )
+        , Browser.Events.onResize BrowserResized
         ]
 
 
@@ -303,11 +316,15 @@ type Msg
     = Tick Duration
     | KeyDown String
     | KeyUp String
+    | BrowserResized Int Int
 
 
 update : Msg -> Model -> ( Model, Cmd Msg )
 update msg model =
     case msg of
+        BrowserResized width height ->
+            ( { model | width = width, height = height }, Cmd.none )
+
         Tick delta ->
             ( Timestep.advance simulateStep delta model, Cmd.none )
 
@@ -438,9 +455,18 @@ view : Model -> Browser.Document Msg
 view model =
     { title = "Ball Fall"
     , body =
-        [ Html.h1 [] [ Html.text "Ball Fall" ]
-        , view3d model
-        , Html.text (Debug.toString model.keysDown)
+        [ view3d model
+        , model.player
+            |> Physics.frame
+            |> Frame3d.originPoint
+            |> Point3d.zCoordinate
+            |> Length.inMeters
+            |> floor
+            |> String.fromInt
+            |> (\z ->
+                    Html.span [ Css.score ]
+                        [ Html.text ("Score: " ++ z) ]
+               )
         ]
     }
 
@@ -454,7 +480,7 @@ view3d model =
                 |> Direction3d.rotateAround Direction3d.x
                     (Angle.degrees -30)
         , shadows = True
-        , dimensions = ( Pixels.int 800, Pixels.int 600 )
+        , dimensions = ( Pixels.int model.width, Pixels.int model.height )
         , camera =
             model.player
                 |> Physics.frame

@@ -1,7 +1,19 @@
 * {
     box-sizing: border-box;
+    font-family: sans-serif;
 }
 
-.temp {
-    color: red;
+body {
+    margin: 0;
+}
+
+.score {
+    position: fixed;
+    top: 0.5rem;
+    left: 0.5rem;
+    color: white;
+    background-color: rgba(0, 0, 0, 0.25);
+    border-radius: 2rem;
+    padding: 0.5rem 1rem;
+    font-size: 2rem;
 }
