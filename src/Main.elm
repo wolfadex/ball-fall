@@ -5,15 +5,18 @@ import Block3d exposing (Block3d)
 import Browser
 import Browser.Events
 import Camera3d
-import Color
+import Color exposing (Color)
 import Css
+import Density
 import Direction3d
 import Duration exposing (Duration)
 import Frame3d
 import Html exposing (Html)
+import Http
 import Json.Decode
-import Length
+import Length exposing (Length)
 import LuminousFlux
+import Obj.Decode
 import Physics exposing (onEarth)
 import Physics.Material
 import Physics.Shape
@@ -25,8 +28,10 @@ import Random
 import Scene3d
 import Scene3d.Light
 import Scene3d.Material
+import Scene3d.Mesh
 import Set exposing (Set)
 import Sphere3d exposing (Sphere3d)
+import Task
 import Timestep exposing (Timestep)
 import Torque
 import Vector3d
@@ -66,7 +71,15 @@ type alias Model =
     , height : Int
     , floorCount : Int
     , keysDown : Set String
+    , ballAssets : Maybe CustomMesh
     }
+
+
+type alias CustomMesh =
+    ( Scene3d.Mesh.Textured Physics.BodyCoordinates
+    , Scene3d.Mesh.Shadow Physics.BodyCoordinates
+    , Scene3d.Material.Textured Physics.BodyCoordinates
+    )
 
 
 init : Flags -> ( Model, Cmd Msg )
@@ -99,7 +112,12 @@ init { initialSeed, width, height } =
     ( { player =
             Physics.sphere
                 playerSphere
-                Physics.Material.wood
+                (Physics.Material.dense
+                    { density = Density.kilogramsPerCubicMeter 900
+                    , friction = 0.9
+                    , bounciness = 0.1
+                    }
+                )
                 |> Physics.translateBy (Vector3d.meters 0 0 2)
                 |> Physics.damp
                     { linear = 0.01
@@ -162,8 +180,54 @@ init { initialSeed, width, height } =
       , width = width
       , height = height
       , keysDown = Set.empty
+      , ballAssets = Nothing
       }
-    , Cmd.none
+    , Task.map2 Tuple.pair
+        (Http.task
+            { method = "GET"
+            , headers = []
+            , url = "/assets/ball.obj"
+            , body = Http.emptyBody
+            , resolver =
+                Http.stringResolver
+                    (\response ->
+                        case response of
+                            Http.BadUrl_ url ->
+                                Err (Http.BadUrl url)
+
+                            Http.Timeout_ ->
+                                Err Http.Timeout
+
+                            Http.NetworkError_ ->
+                                Err Http.NetworkError
+
+                            Http.BadStatus_ metadata _ ->
+                                Err (Http.BadStatus metadata.statusCode)
+
+                            Http.GoodStatus_ _ body ->
+                                let
+                                    units =
+                                        Length.meters
+
+                                    decoder =
+                                        Obj.Decode.map Scene3d.Mesh.texturedFaces
+                                            (Obj.Decode.texturedFacesIn Frame3d.atOrigin)
+                                in
+                                case Obj.Decode.decodeString units decoder body of
+                                    Ok value ->
+                                        Ok value
+
+                                    Err string ->
+                                        Err (Http.BadBody string)
+                    )
+            , timeout = Nothing
+            }
+            |> Task.mapError (\_ -> "Failed to load obj")
+        )
+        (Scene3d.Material.load "/assets/ball.png"
+            |> Task.mapError (\_ -> "Failed to load texture")
+        )
+        |> Task.attempt BallLoaded
     )
 
 
@@ -348,9 +412,10 @@ port playSound : { sound : String } -> Cmd msg
 
 type Msg
     = Tick Duration
+    | BallLoaded (Result String ( Scene3d.Mesh.Textured Physics.BodyCoordinates, Scene3d.Material.Texture Color ))
+    | BrowserResized Int Int
     | KeyDown String
     | KeyUp String
-    | BrowserResized Int Int
 
 
 update : Msg -> Model -> ( Model, Cmd Msg )
@@ -358,6 +423,21 @@ update msg model =
     case msg of
         BrowserResized width height ->
             ( { model | width = width, height = height }, Cmd.none )
+
+        BallLoaded (Err _) ->
+            ( model, Cmd.none )
+
+        BallLoaded (Ok ( mesh, texture )) ->
+            ( { model
+                | ballAssets =
+                    Just
+                        ( mesh
+                        , Scene3d.Mesh.shadow mesh
+                        , Scene3d.Material.texturedMatte texture
+                        )
+              }
+            , Cmd.none
+            )
 
         Tick delta ->
             let
@@ -584,6 +664,10 @@ view3d model =
         camera =
             playerPosition
                 |> makeCamera
+
+        playerZ =
+            Point3d.zCoordinate playerPosition
+                |> Length.inMeters
     in
     Scene3d.custom
         { lights =
@@ -606,15 +690,23 @@ view3d model =
         , clipDepth = Length.millimeters 2
         , background = Scene3d.backgroundColor Color.black
         , entities =
-            [ Scene3d.sphereWithShadow
-                (Scene3d.Material.matte Color.green)
-                (Sphere3d.placeIn (Physics.frame model.player)
-                    playerSphere
-                )
+            [ Scene3d.placeIn (Physics.frame model.player) <|
+                case model.ballAssets of
+                    Nothing ->
+                        Scene3d.sphereWithShadow
+                            (Scene3d.Material.matte Color.green)
+                            playerSphere
+
+                    Just ( mesh, meshShadow, material ) ->
+                        Scene3d.meshWithShadow
+                            material
+                            mesh
+                            meshShadow
+                            |> Scene3d.scaleAbout Point3d.origin 0.25
             , wallPosX
-            , wallNegX
+            , wallNegX playerZ
             , wallPosY
-            , wallNegY
+            , wallNegY playerZ
             ]
                 ++ model.floors
         }
@@ -631,14 +723,14 @@ wallPosX =
     Scene3d.nothing
 
 
-wallNegX : Scene3d.Entity Physics.WorldCoordinates
-wallNegX =
+wallNegX : Float -> Scene3d.Entity Physics.WorldCoordinates
+wallNegX playerZ =
     Scene3d.quadWithShadow
         (Scene3d.Material.matte Color.gray)
-        (Point3d.meters (-maxExtent - 0.01) (maxExtent + 0.01) -800)
-        (Point3d.meters (-maxExtent - 0.01) (-maxExtent - 0.01) -800)
-        (Point3d.meters (-maxExtent - 0.01) (-maxExtent - 0.01) 10)
-        (Point3d.meters (-maxExtent - 0.01) (maxExtent + 0.01) 10)
+        (Point3d.meters (-maxExtent - 0.01) (maxExtent + 0.01) (-60 + playerZ))
+        (Point3d.meters (-maxExtent - 0.01) (-maxExtent - 0.01) (-60 + playerZ))
+        (Point3d.meters (-maxExtent - 0.01) (-maxExtent - 0.01) (10 + playerZ))
+        (Point3d.meters (-maxExtent - 0.01) (maxExtent + 0.01) (10 + playerZ))
 
 
 wallPosY : Scene3d.Entity Physics.WorldCoordinates
@@ -652,14 +744,14 @@ wallPosY =
     Scene3d.nothing
 
 
-wallNegY : Scene3d.Entity Physics.WorldCoordinates
-wallNegY =
+wallNegY : Float -> Scene3d.Entity Physics.WorldCoordinates
+wallNegY playerZ =
     Scene3d.quadWithShadow
         (Scene3d.Material.matte Color.gray)
-        (Point3d.meters (-maxExtent - 0.01) (-maxExtent - 0.01) -800)
-        (Point3d.meters (maxExtent + 0.01) (-maxExtent - 0.01) -800)
-        (Point3d.meters (maxExtent + 0.01) (-maxExtent - 0.01) 10)
-        (Point3d.meters (-maxExtent - 0.01) (-maxExtent - 0.01) 10)
+        (Point3d.meters (-maxExtent - 0.01) (-maxExtent - 0.01) (-60 + playerZ))
+        (Point3d.meters (maxExtent + 0.01) (-maxExtent - 0.01) (-60 + playerZ))
+        (Point3d.meters (maxExtent + 0.01) (-maxExtent - 0.01) (10 + playerZ))
+        (Point3d.meters (-maxExtent - 0.01) (-maxExtent - 0.01) (10 + playerZ))
 
 
 makeCamera : Point3d Length.Meters Physics.WorldCoordinates -> Camera3d.Camera3d Length.Meters Physics.WorldCoordinates
