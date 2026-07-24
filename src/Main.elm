@@ -1,4 +1,4 @@
-module Main exposing (Id, Model, Msg, main)
+port module Main exposing (Id, Model, Msg, main)
 
 import Angle
 import Array
@@ -20,6 +20,7 @@ import Physics.Shape
 import Pixels
 import Plane3d
 import Point3d exposing (Point3d)
+import Quantity
 import Random
 import Scene3d
 import Scene3d.Material
@@ -363,6 +364,9 @@ subscriptions _ =
         ]
 
 
+port playSound : { sound : String } -> Cmd msg
+
+
 type Msg
     = Tick Duration
     | KeyDown String
@@ -377,9 +381,33 @@ update msg model =
             ( { model | width = width, height = height }, Cmd.none )
 
         Tick delta ->
-            ( Timestep.advance simulateStep delta model
-                |> updateFloors
-            , Cmd.none
+            let
+                nextModel =
+                    Timestep.advance simulateStep delta model
+                        |> updateFloors
+
+                sounds =
+                    nextModel.contacts
+                        |> Physics.contactPoints (\id1 id2 -> id1 == Ball || id2 == Ball)
+                        |> List.foldl
+                            (\( id1, id2, contacts ) ->
+                                (++)
+                                    (List.filterMap
+                                        (\{ impulse } ->
+                                            if Quantity.unwrap impulse > 12 then
+                                                Just (playSound { sound = "wood_hit" })
+
+                                            else
+                                                Nothing
+                                        )
+                                        contacts
+                                    )
+                            )
+                            []
+            in
+            ( nextModel
+            , sounds
+                |> Cmd.batch
             )
 
         KeyDown key ->
@@ -400,7 +428,6 @@ updateFloors model =
         let
             newFloor =
                 nextFloor model.floorCount model.seed
-                    |> Debug.log "floor swap"
         in
         { model
             | seed = newFloor.seed

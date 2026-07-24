@@ -11,12 +11,22 @@
     <body>
         <script src="elm.js"></script>
         <script>
-            Elm.Main.init({
+            const audio = {};
+
+            audio["wood_hit"] = new Audio("assets/audio/wood_hit/wood-hit.wav");
+            audio["wood_hit"].volume = 1;
+            audio["wood_hit"].load();
+
+            const app = Elm.Main.init({
                 flags: {
                     initialSeed: Date.now(),
                     width: Math.floor(window.innerWidth),
                     height: Math.floor(window.innerHeight),
                 },
+            });
+
+            app.ports.playSound.subscribe(function ({ sound }) {
+                audio[sound].cloneNode(true).play();
             });
         </script>
     </body>
