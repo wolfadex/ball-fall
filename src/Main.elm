@@ -13,6 +13,7 @@ import Frame3d
 import Html exposing (Html)
 import Json.Decode
 import Length
+import LuminousFlux
 import Physics exposing (onEarth)
 import Physics.Material
 import Physics.Shape
@@ -22,6 +23,7 @@ import Point3d exposing (Point3d)
 import Quantity
 import Random
 import Scene3d
+import Scene3d.Light
 import Scene3d.Material
 import Set exposing (Set)
 import Sphere3d exposing (Sphere3d)
@@ -496,7 +498,7 @@ updatePlayerBall keysDown body =
             cameraFrame =
                 Physics.frame body
                     |> Frame3d.originPoint
-                    |> camera
+                    |> makeCamera
                     |> Camera3d.frame
 
             verticalParts =
@@ -573,21 +575,34 @@ view model =
 
 view3d : Model -> Html Msg
 view3d model =
-    Scene3d.sunny
-        { upDirection = Direction3d.z
-        , sunlightDirection =
-            Direction3d.negativeZ
-                |> Direction3d.rotateAround Direction3d.x
-                    (Angle.degrees -60)
-                |> Direction3d.rotateAround Direction3d.z
-                    (Angle.degrees -45)
-        , shadows = True
-        , dimensions = ( Pixels.int model.width, Pixels.int model.height )
-        , camera =
+    let
+        playerPosition =
             model.player
                 |> Physics.frame
                 |> Frame3d.originPoint
-                |> camera
+
+        camera =
+            playerPosition
+                |> makeCamera
+    in
+    Scene3d.custom
+        { lights =
+            Scene3d.Light.point (Scene3d.Light.castsShadows True)
+                { chromaticity = Scene3d.Light.sunlight
+                , intensity = LuminousFlux.lumens 5000
+                , position =
+                    -- playerPosition
+                    --     |> Point3d.translateBy (Vector3d.meters 0 0 0.4)
+                    camera
+                        |> Camera3d.eyePoint
+                }
+                |> Scene3d.oneLight
+        , exposure = Scene3d.exposureValue 4
+        , toneMapping = Scene3d.hableFilmicToneMapping
+        , whiteBalance = Scene3d.Light.daylight
+        , antialiasing = Scene3d.noAntialiasing
+        , dimensions = ( Pixels.int model.width, Pixels.int model.height )
+        , camera = camera
         , clipDepth = Length.millimeters 2
         , background = Scene3d.backgroundColor Color.black
         , entities =
@@ -601,7 +616,6 @@ view3d model =
             , wallPosY
             , wallNegY
             ]
-                -- ++ List.map viewFloor model.floors
                 ++ model.floors
         }
 
@@ -648,8 +662,8 @@ wallNegY =
         (Point3d.meters (-maxExtent - 0.01) (-maxExtent - 0.01) 10)
 
 
-camera : Point3d Length.Meters Physics.WorldCoordinates -> Camera3d.Camera3d Length.Meters Physics.WorldCoordinates
-camera playerPosition =
+makeCamera : Point3d Length.Meters Physics.WorldCoordinates -> Camera3d.Camera3d Length.Meters Physics.WorldCoordinates
+makeCamera playerPosition =
     Camera3d.lookAt
         { eyePoint =
             playerPosition
