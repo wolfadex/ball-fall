@@ -1,7 +1,6 @@
-port module Main exposing (Id, Model, Msg, main)
+port module Main exposing (Flags, Id, Model, Msg, main)
 
 import Angle
-import Array
 import Block3d exposing (Block3d)
 import Browser
 import Browser.Events
@@ -24,12 +23,10 @@ import Quantity
 import Random
 import Scene3d
 import Scene3d.Material
-import Scene3d.Mesh
 import Set exposing (Set)
 import Sphere3d exposing (Sphere3d)
 import Timestep exposing (Timestep)
 import Torque
-import TriangularMesh exposing (TriangularMesh)
 import Vector3d
 
 
@@ -53,14 +50,7 @@ type alias Flags =
 type Id
     = Ball
     | FloorPiece Int
-    | Wall Side
-
-
-type Side
-    = PosX
-    | PosY
-    | NegX
-    | NegY
+    | Wall
 
 
 type alias Model =
@@ -68,7 +58,7 @@ type alias Model =
     , bodies : List ( Id, Physics.Body )
     , contacts : Physics.Contacts Id
     , timestep : Timestep
-    , floors : List ( Scene3d.Mesh.Uniform Physics.BodyCoordinates, Scene3d.Mesh.Shadow Physics.BodyCoordinates )
+    , floors : List (Scene3d.Entity Physics.WorldCoordinates)
     , seed : Random.Seed
     , width : Int
     , height : Int
@@ -114,7 +104,7 @@ init { initialSeed, width, height } =
                     , angular = 0.5
                     }
       , bodies =
-            [ ( Wall PosX
+            [ ( Wall
               , Physics.plane
                     (Plane3d.yz
                         |> Plane3d.flip
@@ -122,14 +112,14 @@ init { initialSeed, width, height } =
                     )
                     Physics.Material.wood
               )
-            , ( Wall NegX
+            , ( Wall
               , Physics.plane
                     (Plane3d.yz
                         |> Plane3d.translateBy (Vector3d.meters -maxExtent 0 0)
                     )
                     Physics.Material.wood
               )
-            , ( Wall PosY
+            , ( Wall
               , Physics.plane
                     (Plane3d.zx
                         |> Plane3d.flip
@@ -137,7 +127,7 @@ init { initialSeed, width, height } =
                     )
                     Physics.Material.wood
               )
-            , ( Wall NegY
+            , ( Wall
               , Physics.plane
                     (Plane3d.zx
                         |> Plane3d.translateBy (Vector3d.meters 0 -maxExtent 0)
@@ -156,14 +146,14 @@ init { initialSeed, width, height } =
       , contacts = Physics.emptyContacts
       , timestep = initTimestep
       , floors =
-            [ fl1.mesh
-            , fl2.mesh
-            , fl3.mesh
-            , fl4.mesh
-            , fl5.mesh
-            , fl6.mesh
-            , fl7.mesh
-            , fl8.mesh
+            [ fl1.entity
+            , fl2.entity
+            , fl3.entity
+            , fl4.entity
+            , fl5.entity
+            , fl6.entity
+            , fl7.entity
+            , fl8.entity
             ]
       , floorCount = fl8.floorCount
       , seed = fl8.seed
@@ -179,7 +169,7 @@ nextFloor :
     Int
     -> Random.Seed
     ->
-        { mesh : ( Scene3d.Mesh.Uniform Physics.BodyCoordinates, Scene3d.Mesh.Shadow Physics.BodyCoordinates )
+        { entity : Scene3d.Entity Physics.WorldCoordinates
         , bodies : List ( Id, Physics.Body )
         , floorCount : Int
         , seed : Random.Seed
@@ -190,13 +180,41 @@ nextFloor floorCount seed =
             Random.step nextHole seed
 
         floor =
-            generateFloor (toFloat floorCount * floorSpacing) hole
+            generateFloor hole
 
-        floorTris =
-            floorToTris floor
+        floorBlocks =
+            List.filterMap identity
+                [ floor.leftOfHole
+                , floor.rightOfHole
+                , floor.forwardOfHole
+                , floor.backwardOfHole
+                ]
+
+        zOffset =
+            Vector3d.meters 0 0 (toFloat floorCount * floorSpacing)
     in
-    { mesh = floorTrisToMesh floorTris
-    , bodies = List.map (floorTrisToBody floorCount) floorTris
+    { entity =
+        floorBlocks
+            |> List.map
+                (Scene3d.blockWithShadow
+                    (Scene3d.Material.matte Color.white)
+                )
+            |> Scene3d.group
+            |> Scene3d.placeIn Frame3d.atOrigin
+            |> Scene3d.translateBy zOffset
+    , bodies =
+        List.map
+            (\block ->
+                ( FloorPiece floorCount
+                , Physics.static
+                    [ ( Physics.Shape.block block
+                      , Physics.Material.wood
+                      )
+                    ]
+                    |> Physics.translateBy zOffset
+                )
+            )
+            floorBlocks
     , floorCount = floorCount + 1
     , seed = nextSeed
     }
@@ -205,20 +223,6 @@ nextFloor floorCount seed =
 floorSpacing : Float
 floorSpacing =
     -3
-
-
-floorTrisToMesh : List (TriangularMesh Vert) -> ( Scene3d.Mesh.Uniform Physics.BodyCoordinates, Scene3d.Mesh.Shadow Physics.BodyCoordinates )
-floorTrisToMesh tris =
-    let
-        mesh =
-            tris
-                |> TriangularMesh.combine
-                |> Scene3d.Mesh.indexedFacets
-                |> Scene3d.Mesh.cullBackFaces
-    in
-    ( mesh
-    , Scene3d.Mesh.shadow mesh
-    )
 
 
 maxExtent : Float
@@ -246,99 +250,72 @@ initTimestep =
         }
 
 
-type alias Vert =
-    Point3d Length.Meters Physics.BodyCoordinates
-
-
 type alias Floor =
-    { leftOfHole : List Vert
-    , rightOfHole : List Vert
-    , forwardOfHole : List Vert
-    , backwardOfHole : List Vert
+    { leftOfHole : Maybe (Block3d Length.Meters Physics.BodyCoordinates)
+    , rightOfHole : Maybe (Block3d Length.Meters Physics.BodyCoordinates)
+    , forwardOfHole : Maybe (Block3d Length.Meters Physics.BodyCoordinates)
+    , backwardOfHole : Maybe (Block3d Length.Meters Physics.BodyCoordinates)
     }
 
 
-floorTrisToBody : Int -> TriangularMesh Vert -> ( Id, Physics.Body )
-floorTrisToBody floorNumber floorMesh =
-    ( FloorPiece floorNumber
-    , Physics.static
-        [ ( Physics.Shape.unsafeConvex
-                floorMesh
-          , Physics.Material.wood
-          )
-        ]
-    )
-
-
-floorToTris : Floor -> List (TriangularMesh Vert)
-floorToTris floor =
-    List.map
-        (\verts ->
-            TriangularMesh.indexed
-                (Array.fromList (verts ++ List.map (Point3d.translateBy (Vector3d.meters 0 0 -0.3)) verts))
-                [ ( 0, 1, 2 )
-                , ( 0, 2, 3 )
-                , ( 4, 5, 1 )
-                , ( 4, 1, 0 )
-                , ( 7, 4, 0 )
-                , ( 7, 0, 3 )
-                , ( 5, 6, 2 )
-                , ( 5, 2, 1 )
-                , ( 6, 7, 3 )
-                , ( 6, 3, 2 )
-                , ( 7, 6, 5 )
-                , ( 7, 5, 4 )
-                ]
-        )
-        [ floor.leftOfHole
-        , floor.rightOfHole
-        , floor.forwardOfHole
-        , floor.backwardOfHole
-        ]
-
-
-generateFloor : Float -> ( Int, Int ) -> Floor
-generateFloor zOffset ( holeX, holeY ) =
+generateFloor : ( Int, Int ) -> Floor
+generateFloor ( holeX, holeY ) =
     { leftOfHole =
         if holeY < intExtent then
-            [ Point3d.meters -maxExtent maxExtent zOffset
-            , Point3d.meters -maxExtent (toFloat holeY + 0.5) zOffset
-            , Point3d.meters maxExtent (toFloat holeY + 0.5) zOffset
-            , Point3d.meters maxExtent maxExtent zOffset
-            ]
+            Block3d.with
+                { x1 = Length.meters maxExtent
+                , y1 = Length.meters maxExtent
+                , z1 = Length.meters 0
+                , x2 = Length.meters -maxExtent
+                , y2 = Length.meters (toFloat holeY + 0.5)
+                , z2 = Length.meters -0.3
+                }
+                |> Just
 
         else
-            []
+            Nothing
     , rightOfHole =
         if holeY > -intExtent then
-            [ Point3d.meters -maxExtent (toFloat holeY - 0.5) zOffset
-            , Point3d.meters -maxExtent -maxExtent zOffset
-            , Point3d.meters maxExtent -maxExtent zOffset
-            , Point3d.meters maxExtent (toFloat holeY - 0.5) zOffset
-            ]
+            Block3d.with
+                { x1 = Length.meters maxExtent
+                , y1 = Length.meters (toFloat holeY - 0.5)
+                , z1 = Length.meters 0
+                , x2 = Length.meters -maxExtent
+                , y2 = Length.meters -maxExtent
+                , z2 = Length.meters -0.3
+                }
+                |> Just
 
         else
-            []
+            Nothing
     , forwardOfHole =
         if holeX < intExtent then
-            [ Point3d.meters (toFloat holeX + 0.5) (toFloat holeY + 0.5) zOffset
-            , Point3d.meters (toFloat holeX + 0.5) (toFloat holeY + -0.5) zOffset
-            , Point3d.meters maxExtent (toFloat holeY + -0.5) zOffset
-            , Point3d.meters maxExtent (toFloat holeY + 0.5) zOffset
-            ]
+            Block3d.with
+                { x1 = Length.meters maxExtent
+                , y1 = Length.meters (toFloat holeY + 0.5)
+                , z1 = Length.meters 0
+                , x2 = Length.meters (toFloat holeX + 0.5)
+                , y2 = Length.meters (toFloat holeY + -0.5)
+                , z2 = Length.meters -0.3
+                }
+                |> Just
 
         else
-            []
+            Nothing
     , backwardOfHole =
         if holeX > -intExtent then
-            [ Point3d.meters -maxExtent (toFloat holeY + 0.5) zOffset
-            , Point3d.meters -maxExtent (toFloat holeY + -0.5) zOffset
-            , Point3d.meters (toFloat holeX - 0.5) (toFloat holeY + -0.5) zOffset
-            , Point3d.meters (toFloat holeX - 0.5) (toFloat holeY + 0.5) zOffset
-            ]
+            Block3d.with
+                { x1 = Length.meters (toFloat holeX - 0.5)
+                , y1 = Length.meters (toFloat holeY + 0.5)
+                , z1 = Length.meters 0
+                , x2 = Length.meters -maxExtent
+                , y2 = Length.meters (toFloat holeY + -0.5)
+                , z2 = Length.meters -0.3
+                }
+                |> Just
 
         else
-            []
+            Nothing
     }
 
 
@@ -390,11 +367,11 @@ update msg model =
                     nextModel.contacts
                         |> Physics.contactPoints (\id1 id2 -> id1 == Ball || id2 == Ball)
                         |> List.foldl
-                            (\( id1, id2, contacts ) ->
+                            (\( _, _, contacts ) ->
                                 (++)
                                     (List.filterMap
                                         (\{ impulse } ->
-                                            if Quantity.unwrap impulse > 12 then
+                                            if Quantity.unwrap impulse > 45 then
                                                 Just (playSound { sound = "wood_hit" })
 
                                             else
@@ -438,7 +415,7 @@ updateFloors model =
                         model.floors
 
                     _ :: restFloors ->
-                        restFloors ++ [ newFloor.mesh ]
+                        restFloors ++ [ newFloor.entity ]
             , bodies =
                 newFloor.bodies
                     ++ List.filter
@@ -499,6 +476,7 @@ extractPlayerHelper defaultPlayer searched toSearch =
                 extractPlayerHelper defaultPlayer (next :: searched) rest
 
 
+updatePlayerBall : Set String -> Physics.Body -> Physics.Body
 updatePlayerBall keysDown body =
     let
         applyForward =
@@ -623,7 +601,8 @@ view3d model =
             , wallPosY
             , wallNegY
             ]
-                ++ List.map viewFloor model.floors
+                -- ++ List.map viewFloor model.floors
+                ++ model.floors
         }
 
 
@@ -667,15 +646,6 @@ wallNegY =
         (Point3d.meters (maxExtent + 0.01) (-maxExtent - 0.01) -800)
         (Point3d.meters (maxExtent + 0.01) (-maxExtent - 0.01) 10)
         (Point3d.meters (-maxExtent - 0.01) (-maxExtent - 0.01) 10)
-
-
-viewFloor : ( Scene3d.Mesh.Uniform Physics.BodyCoordinates, Scene3d.Mesh.Shadow Physics.BodyCoordinates ) -> Scene3d.Entity Physics.WorldCoordinates
-viewFloor ( mesh, shadow ) =
-    Scene3d.meshWithShadow
-        (Scene3d.Material.matte Color.white)
-        mesh
-        shadow
-        |> Scene3d.placeIn Frame3d.atOrigin
 
 
 camera : Point3d Length.Meters Physics.WorldCoordinates -> Camera3d.Camera3d Length.Meters Physics.WorldCoordinates

@@ -55,3 +55,4 @@ config =
     , NoUnused.Variables.rule
     , Simplify.rule Simplify.defaults
     ]
+        |> List.map (Rule.ignoreErrorsForDirectories [ "vendored/" ])
