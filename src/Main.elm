@@ -171,8 +171,7 @@ meshResolver =
 
 
 nextFloor :
-    Assets
-    -> Int
+    Int
     -> Random.Seed
     ->
         { entity : Scene3d.Entity Physics.WorldCoordinates
@@ -181,7 +180,7 @@ nextFloor :
         , seed : Random.Seed
         , hole : ( Float, Float )
         }
-nextFloor assets floorCount seed =
+nextFloor floorCount seed =
     let
         ( hole, nextSeed ) =
             Random.step nextHole seed
@@ -400,28 +399,28 @@ update msg model =
                             }
 
                         fl1 =
-                            nextFloor assets 0 model.seed
+                            nextFloor 0 model.seed
 
                         fl2 =
-                            nextFloor assets fl1.floorCount fl1.seed
+                            nextFloor fl1.floorCount fl1.seed
 
                         fl3 =
-                            nextFloor assets fl2.floorCount fl2.seed
+                            nextFloor fl2.floorCount fl2.seed
 
                         fl4 =
-                            nextFloor assets fl3.floorCount fl3.seed
+                            nextFloor fl3.floorCount fl3.seed
 
                         fl5 =
-                            nextFloor assets fl4.floorCount fl4.seed
+                            nextFloor fl4.floorCount fl4.seed
 
                         fl6 =
-                            nextFloor assets fl5.floorCount fl5.seed
+                            nextFloor fl5.floorCount fl5.seed
 
                         fl7 =
-                            nextFloor assets fl6.floorCount fl6.seed
+                            nextFloor fl6.floorCount fl6.seed
 
                         fl8 =
-                            nextFloor assets fl7.floorCount fl7.seed
+                            nextFloor fl7.floorCount fl7.seed
                     in
                     ( { model
                         | game =
@@ -594,7 +593,7 @@ updateFloors delta game model =
     if Length.inMeters (Point3d.zCoordinate (Frame3d.originPoint (Physics.frame game.player))) < (toFloat (game.floorCount - maxFloors) * floorSpacing) then
         let
             newFloor =
-                nextFloor game.assets game.floorCount model.seed
+                nextFloor game.floorCount model.seed
 
             ( holeX, holeY ) =
                 newFloor.hole
