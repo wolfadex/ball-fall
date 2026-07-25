@@ -1105,11 +1105,13 @@ wallNegY playerZ =
 
 makeCamera : Point3d Length.Meters Physics.WorldCoordinates -> Camera3d.Camera3d Length.Meters Physics.WorldCoordinates
 makeCamera playerPosition =
+    let
+        pp =
+            Point3d.unwrap playerPosition
+    in
     Camera3d.lookAt
-        { eyePoint =
-            playerPosition
-                |> Point3d.translateBy (Vector3d.meters 3 3 3)
-        , focalPoint = playerPosition
+        { eyePoint = Point3d.unsafe { x = 3, y = 3, z = pp.z + 3 }
+        , focalPoint = Point3d.unsafe { x = 0, y = 0, z = pp.z }
         , upDirection = Direction3d.z
         , projection = Camera3d.Perspective
         , fov = Camera3d.angle (Angle.degrees 90)
