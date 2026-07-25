@@ -366,7 +366,7 @@ subscriptions _ =
         ]
 
 
-port playSound : { sound : String } -> Cmd msg
+port playSound : { sound : String, volume : Float } -> Cmd msg
 
 
 type Msg
@@ -502,12 +502,12 @@ update msg model =
 
                             else
                                 let
-                                    ( nextGame, nextModel ) =
+                                    ( nextGame, nextModel, goalMade ) =
                                         updateFloors delta
                                             (Timestep.advance simulateStep delta game)
                                             model
 
-                                    sounds =
+                                    ballHits =
                                         nextGame.contacts
                                             |> Physics.contactPoints (\id1 id2 -> id1 == Ball || id2 == Ball)
                                             |> List.foldl
@@ -515,8 +515,13 @@ update msg model =
                                                     (++)
                                                         (List.filterMap
                                                             (\{ impulse } ->
-                                                                if Quantity.unwrap impulse > 45 then
-                                                                    Just (playSound { sound = "wood_hit" })
+                                                                if Quantity.unwrap impulse > 65 then
+                                                                    Just
+                                                                        (playSound
+                                                                            { sound = "ball_hit"
+                                                                            , volume = 0.3
+                                                                            }
+                                                                        )
 
                                                                 else
                                                                     Nothing
@@ -527,8 +532,17 @@ update msg model =
                                                 []
                                 in
                                 ( nextModel
-                                , sounds
-                                    |> Cmd.batch
+                                , Cmd.batch
+                                    [ Cmd.batch ballHits
+                                    , if goalMade then
+                                        playSound
+                                            { sound = "goal_made"
+                                            , volume = 0.4
+                                            }
+
+                                      else
+                                        Cmd.none
+                                    ]
                                 )
 
                 _ ->
@@ -746,7 +760,7 @@ maxFloors =
     8
 
 
-updateFloors : Duration -> LoadedGame -> Model -> ( LoadedGame, Model )
+updateFloors : Duration -> LoadedGame -> Model -> ( LoadedGame, Model, Bool )
 updateFloors delta game model =
     if Length.inMeters (Point3d.zCoordinate (Frame3d.originPoint (Physics.frame game.player))) < (toFloat (game.floorCount - maxFloors) * floorSpacing) then
         let
@@ -825,6 +839,7 @@ updateFloors delta game model =
             | seed = newFloor.seed
             , game = Loaded nextGame
           }
+        , True
         )
 
     else
@@ -855,6 +870,7 @@ updateFloors delta game model =
                         , remainingTime = game.remainingTime |> Quantity.minus delta
                     }
           }
+        , False
         )
 
 
