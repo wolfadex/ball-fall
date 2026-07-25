@@ -20,19 +20,21 @@ run = "run-pty run-pty.json"
 run = "elm-watch hot"
 
 [tasks.dev-css]
-run = "css-in-elm watch public/styles.css src/Css.elm"
+run = "css-in-elm watch docs/styles.css src/Css.elm"
 
 [tasks.dev-review]
 run = "elm-review --watch --fix"
 
 [tasks.build]
-run = "build-review && build-css && build-elm"
+depends = ["build-elm"]
 
 [tasks.build-review]
+depends = ["build-css"]
 run = "elm-review"
 
 [tasks.build-css]
-run = "css-in-elm build public/styles.css src/Css.elm"
+run = "css-in-elm build docs/styles.css src/Css.elm"
 
 [tasks.build-elm]
-run = "elm-watch --optimize"
+depends = ["build-review"]
+run = "elm-watch make --optimize"
