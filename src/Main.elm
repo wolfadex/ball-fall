@@ -569,7 +569,12 @@ update msg model =
                 Loaded game ->
                     case game.stage of
                         Playing Paused ->
-                            ( { model | game = Loaded { game | stage = Playing Falling } }, Cmd.none )
+                            ( { model | game = Loaded { game | stage = Playing Falling } }
+                            , playSound
+                                { sound = "menu_select"
+                                , volume = 0.15
+                                }
+                            )
 
                         _ ->
                             ( model, Cmd.none )
@@ -694,7 +699,10 @@ initNewGame model game =
                 , remainingTime = initTimer
                 }
       }
-    , Cmd.none
+    , playSound
+        { sound = "menu_select"
+        , volume = 0.15
+        }
     )
 
 
