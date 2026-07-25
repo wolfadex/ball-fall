@@ -415,30 +415,6 @@ update msg model =
                             , holeShadow = Scene3d.Mesh.shadow holeMesh
                             , goalRingMesh = goalRingMesh
                             }
-
-                        fl1 =
-                            nextFloor 0 model.seed
-
-                        fl2 =
-                            nextFloor fl1.floorCount fl1.seed
-
-                        fl3 =
-                            nextFloor fl2.floorCount fl2.seed
-
-                        fl4 =
-                            nextFloor fl3.floorCount fl3.seed
-
-                        fl5 =
-                            nextFloor fl4.floorCount fl4.seed
-
-                        fl6 =
-                            nextFloor fl5.floorCount fl5.seed
-
-                        fl7 =
-                            nextFloor fl6.floorCount fl6.seed
-
-                        fl8 =
-                            nextFloor fl7.floorCount fl7.seed
                     in
                     ( { model
                         | game =
@@ -1045,6 +1021,7 @@ view model =
     }
 
 
+viewGame : Model -> LoadedGame -> List (Html Msg)
 viewGame model game =
     case game.stage of
         MainMenu ->
