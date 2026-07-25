@@ -127,7 +127,7 @@ init { initialSeed, width, height } =
       }
     , Task.map4 (\a b c d -> ( ( a, b ), c, d ))
         (getMesh "ball")
-        (Scene3d.Material.load "/assets/ball.png"
+        (Scene3d.Material.load "assets/ball.png"
             |> Task.mapError (\_ -> "Failed to load texture")
         )
         (getMesh "hole")
@@ -141,7 +141,7 @@ getMesh name =
     Http.task
         { method = "GET"
         , headers = []
-        , url = "/assets/" ++ name ++ ".obj"
+        , url = "assets/" ++ name ++ ".obj"
         , body = Http.emptyBody
         , resolver = meshResolver
         , timeout = Nothing
