@@ -10,11 +10,12 @@ import Css
 import Density
 import Direction3d
 import Duration exposing (Duration)
-import Frame3d
+import Frame3d exposing (Frame3d)
 import Html exposing (Html)
 import Http
 import Json.Decode
 import Length
+import LineSegment3d
 import LuminousFlux
 import Obj.Decode
 import Physics exposing (onEarth)
@@ -31,7 +32,7 @@ import Scene3d.Material
 import Scene3d.Mesh
 import Set exposing (Set)
 import Sphere3d exposing (Sphere3d)
-import Task
+import Task exposing (Task)
 import Timestep exposing (Timestep)
 import Torque
 import Vector3d
@@ -83,7 +84,14 @@ type alias LoadedGame =
     , floorCount : Int
     , keysDown : Set String
     , assets : Assets
+    , currentGoal : ( GoalFrame, Float )
+    , upcomingGoals : List GoalFrame
+    , previousGoals : List ( GoalFrame, Float, Duration )
     }
+
+
+type alias GoalFrame =
+    Frame3d Length.Meters Physics.WorldCoordinates { defines : Physics.BodyCoordinates }
 
 
 type alias Assets =
@@ -92,6 +100,7 @@ type alias Assets =
     , ballMaterial : Scene3d.Material.Textured Physics.BodyCoordinates
     , holeMesh : Scene3d.Mesh.Textured Physics.BodyCoordinates
     , holeShadow : Scene3d.Mesh.Shadow Physics.BodyCoordinates
+    , goalRingMesh : Scene3d.Mesh.Textured Physics.BodyCoordinates
     }
 
 
@@ -102,32 +111,28 @@ init { initialSeed, width, height } =
       , height = height
       , game = Loading
       }
-    , Task.map3 (\a b c -> ( a, b, c ))
-        (Http.task
-            { method = "GET"
-            , headers = []
-            , url = "/assets/ball.obj"
-            , body = Http.emptyBody
-            , resolver = meshResolver
-            , timeout = Nothing
-            }
-            |> Task.mapError (\_ -> "Failed to load ball obj")
-        )
+    , Task.map4 (\a b c d -> ( ( a, b ), c, d ))
+        (getMesh "ball")
         (Scene3d.Material.load "/assets/ball.png"
             |> Task.mapError (\_ -> "Failed to load texture")
         )
-        (Http.task
-            { method = "GET"
-            , headers = []
-            , url = "/assets/hole.obj"
-            , body = Http.emptyBody
-            , resolver = meshResolver
-            , timeout = Nothing
-            }
-            |> Task.mapError (\_ -> "Failed to load hole obj")
-        )
+        (getMesh "hole")
+        (getMesh "goal_ring")
         |> Task.attempt AssetsLoaded
     )
+
+
+getMesh : String -> Task String (Scene3d.Mesh.Textured coordinates)
+getMesh name =
+    Http.task
+        { method = "GET"
+        , headers = []
+        , url = "/assets/" ++ name ++ ".obj"
+        , body = Http.emptyBody
+        , resolver = meshResolver
+        , timeout = Nothing
+        }
+        |> Task.mapError (\_ -> "Failed to load " ++ name ++ " obj")
 
 
 meshResolver : Http.Resolver Http.Error (Scene3d.Mesh.Textured coordinates)
@@ -166,18 +171,23 @@ meshResolver =
 
 
 nextFloor :
-    Int
+    Assets
+    -> Int
     -> Random.Seed
     ->
         { entity : Scene3d.Entity Physics.WorldCoordinates
         , bodies : List ( Id, Physics.Body )
         , floorCount : Int
         , seed : Random.Seed
+        , hole : ( Float, Float )
         }
-nextFloor floorCount seed =
+nextFloor assets floorCount seed =
     let
         ( hole, nextSeed ) =
             Random.step nextHole seed
+
+        ( holeX, holeY ) =
+            hole
 
         floor =
             generateFloor hole
@@ -217,6 +227,7 @@ nextFloor floorCount seed =
             floorBlocks
     , floorCount = floorCount + 1
     , seed = nextSeed
+    , hole = ( toFloat holeX, toFloat holeY )
     }
 
 
@@ -348,8 +359,10 @@ type Msg
     = AssetsLoaded
         (Result
             String
-            ( Scene3d.Mesh.Textured Physics.BodyCoordinates
-            , Scene3d.Material.Texture Color
+            ( ( Scene3d.Mesh.Textured Physics.BodyCoordinates
+              , Scene3d.Material.Texture Color
+              )
+            , Scene3d.Mesh.Textured Physics.BodyCoordinates
             , Scene3d.Mesh.Textured Physics.BodyCoordinates
             )
         )
@@ -373,33 +386,42 @@ update msg model =
                 _ ->
                     ( model, Cmd.none )
 
-        AssetsLoaded (Ok ( ballMesh, ballTexture, holeMesh )) ->
+        AssetsLoaded (Ok ( ( ballMesh, ballTexture ), holeMesh, goalRingMesh )) ->
             case model.game of
                 Loading ->
                     let
+                        assets =
+                            { ballMesh = ballMesh
+                            , ballShadow = Scene3d.Mesh.shadow ballMesh
+                            , ballMaterial = Scene3d.Material.texturedMatte ballTexture
+                            , holeMesh = holeMesh
+                            , holeShadow = Scene3d.Mesh.shadow holeMesh
+                            , goalRingMesh = goalRingMesh
+                            }
+
                         fl1 =
-                            nextFloor 0 model.seed
+                            nextFloor assets 0 model.seed
 
                         fl2 =
-                            nextFloor fl1.floorCount fl1.seed
+                            nextFloor assets fl1.floorCount fl1.seed
 
                         fl3 =
-                            nextFloor fl2.floorCount fl2.seed
+                            nextFloor assets fl2.floorCount fl2.seed
 
                         fl4 =
-                            nextFloor fl3.floorCount fl3.seed
+                            nextFloor assets fl3.floorCount fl3.seed
 
                         fl5 =
-                            nextFloor fl4.floorCount fl4.seed
+                            nextFloor assets fl4.floorCount fl4.seed
 
                         fl6 =
-                            nextFloor fl5.floorCount fl5.seed
+                            nextFloor assets fl5.floorCount fl5.seed
 
                         fl7 =
-                            nextFloor fl6.floorCount fl6.seed
+                            nextFloor assets fl6.floorCount fl6.seed
 
                         fl8 =
-                            nextFloor fl7.floorCount fl7.seed
+                            nextFloor assets fl7.floorCount fl7.seed
                     in
                     ( { model
                         | game =
@@ -472,13 +494,35 @@ update msg model =
                                     ]
                                 , floorCount = fl8.floorCount
                                 , keysDown = Set.empty
-                                , assets =
-                                    { ballMesh = ballMesh
-                                    , ballShadow = Scene3d.Mesh.shadow ballMesh
-                                    , ballMaterial = Scene3d.Material.texturedMatte ballTexture
-                                    , holeMesh = holeMesh
-                                    , holeShadow = Scene3d.Mesh.shadow holeMesh
-                                    }
+                                , assets = assets
+                                , currentGoal =
+                                    let
+                                        ( holeX, holeY ) =
+                                            fl1.hole
+                                    in
+                                    ( Frame3d.atPoint
+                                        (Point3d.meters holeX holeY 0)
+                                    , 0
+                                    )
+                                , upcomingGoals =
+                                    List.indexedMap
+                                        (\index ( holeX, holeY ) ->
+                                            Frame3d.atPoint
+                                                (Point3d.meters
+                                                    holeX
+                                                    holeY
+                                                    (toFloat (index + 1) * floorSpacing)
+                                                )
+                                        )
+                                        [ fl2.hole
+                                        , fl3.hole
+                                        , fl4.hole
+                                        , fl5.hole
+                                        , fl6.hole
+                                        , fl7.hole
+                                        , fl8.hole
+                                        ]
+                                , previousGoals = []
                                 }
                       }
                     , Cmd.none
@@ -492,7 +536,7 @@ update msg model =
                 Loaded game ->
                     let
                         ( nextGame, nextModel ) =
-                            updateFloors
+                            updateFloors delta
                                 (Timestep.advance simulateStep delta game)
                                 model
 
@@ -545,12 +589,43 @@ maxFloors =
     8
 
 
-updateFloors : LoadedGame -> Model -> ( LoadedGame, Model )
-updateFloors game model =
+updateFloors : Duration -> LoadedGame -> Model -> ( LoadedGame, Model )
+updateFloors delta game model =
     if Length.inMeters (Point3d.zCoordinate (Frame3d.originPoint (Physics.frame game.player))) < (toFloat (game.floorCount - maxFloors) * floorSpacing) then
         let
             newFloor =
-                nextFloor game.floorCount model.seed
+                nextFloor game.assets game.floorCount model.seed
+
+            ( holeX, holeY ) =
+                newFloor.hole
+
+            ( holeFrame, holeHue ) =
+                game.currentGoal
+
+            ( currentGoal, upcomingGoals ) =
+                case game.upcomingGoals of
+                    [] ->
+                        ( game.currentGoal
+                        , [ Frame3d.atPoint
+                                (Point3d.meters
+                                    holeX
+                                    holeY
+                                    (toFloat (newFloor.floorCount - 1) * floorSpacing)
+                                )
+                          ]
+                        )
+
+                    cg :: up ->
+                        ( ( cg, 0 )
+                        , up
+                            ++ [ Frame3d.atPoint
+                                    (Point3d.meters
+                                        holeX
+                                        holeY
+                                        (toFloat (newFloor.floorCount - 1) * floorSpacing)
+                                    )
+                               ]
+                        )
 
             nextGame =
                 { game
@@ -574,6 +649,17 @@ updateFloors game model =
                                             True
                                 )
                                 game.bodies
+                    , currentGoal = currentGoal
+                    , upcomingGoals = upcomingGoals
+                    , previousGoals =
+                        List.filterMap
+                            (animateGoals delta)
+                            (( holeFrame
+                             , holeHue
+                             , goalLife
+                             )
+                                :: game.previousGoals
+                            )
                 }
         in
         ( nextGame
@@ -584,7 +670,63 @@ updateFloors game model =
         )
 
     else
-        ( game, { model | game = Loaded game } )
+        let
+            ( hole, holeHue ) =
+                game.currentGoal
+
+            newHue =
+                holeHue + Duration.inSeconds delta / 2.5
+        in
+        ( game
+        , { model
+            | game =
+                Loaded
+                    { game
+                        | currentGoal =
+                            ( hole
+                            , if newHue > 1 then
+                                newHue - 1
+
+                              else
+                                newHue
+                            )
+                        , previousGoals =
+                            List.filterMap
+                                (animateGoals delta)
+                                game.previousGoals
+                    }
+          }
+        )
+
+
+goalLife : Duration
+goalLife =
+    Duration.seconds 0.5
+
+
+animateGoals : Duration -> ( GoalFrame, Float, Duration ) -> Maybe ( GoalFrame, Float, Duration )
+animateGoals delta ( hole, hue, life ) =
+    let
+        remainingLife =
+            life |> Quantity.minus delta
+    in
+    if remainingLife |> Quantity.greaterThan (Duration.seconds 0) then
+        let
+            newHue =
+                hue + Duration.inSeconds delta / 2.5
+        in
+        Just
+            ( hole
+            , if newHue > 1 then
+                newHue - 1
+
+              else
+                newHue
+            , remainingLife
+            )
+
+    else
+        Nothing
 
 
 simulateStep : LoadedGame -> LoadedGame
@@ -747,19 +889,30 @@ view3d model game =
         playerZ =
             Point3d.zCoordinate playerPosition
                 |> Length.inMeters
+
+        ( holeFrame, holeHue ) =
+            game.currentGoal
+
+        holeColor =
+            Color.hsl holeHue 1.0 0.5
     in
     Scene3d.custom
         { lights =
-            Scene3d.Light.point (Scene3d.Light.castsShadows True)
-                { chromaticity = Scene3d.Light.sunlight
-                , intensity = LuminousFlux.lumens 5000
-                , position =
-                    -- playerPosition
-                    --     |> Point3d.translateBy (Vector3d.meters 0 0 0.4)
-                    camera
-                        |> Camera3d.eyePoint
-                }
-                |> Scene3d.oneLight
+            Scene3d.twoLights
+                (Scene3d.Light.point (Scene3d.Light.castsShadows True)
+                    { chromaticity = Scene3d.Light.sunlight
+                    , intensity = LuminousFlux.lumens 5000
+                    , position =
+                        camera
+                            |> Camera3d.eyePoint
+                    }
+                )
+                (Scene3d.Light.point (Scene3d.Light.castsShadows False)
+                    { chromaticity = Scene3d.Light.color holeColor
+                    , intensity = LuminousFlux.lumens 250
+                    , position = Frame3d.originPoint holeFrame
+                    }
+                )
         , exposure = Scene3d.exposureValue 4
         , toneMapping = Scene3d.hableFilmicToneMapping
         , whiteBalance = Scene3d.Light.daylight
@@ -779,9 +932,59 @@ view3d model game =
             , wallNegX playerZ
             , wallPosY
             , wallNegY playerZ
+            , Scene3d.mesh
+                (Scene3d.Material.matte holeColor)
+                game.assets.goalRingMesh
+                |> Scene3d.scaleAbout Point3d.origin 0.9
+                |> Scene3d.placeIn holeFrame
             ]
+                ++ List.map (viewGoal game.assets) game.previousGoals
                 ++ game.floors
         }
+
+
+viewGimble : Point3d Length.Meters coordinates -> Scene3d.Entity coordinates
+viewGimble point =
+    Scene3d.group
+        [ Scene3d.lineSegment
+            (Scene3d.Material.color Color.red)
+            (LineSegment3d.from
+                point
+                (point
+                    |> Point3d.translateBy (Vector3d.meters 1 0 0)
+                )
+            )
+        , Scene3d.lineSegment
+            (Scene3d.Material.color Color.green)
+            (LineSegment3d.from
+                point
+                (point
+                    |> Point3d.translateBy (Vector3d.meters 0 1 0)
+                )
+            )
+        , Scene3d.lineSegment
+            (Scene3d.Material.color Color.blue)
+            (LineSegment3d.from
+                point
+                (point
+                    |> Point3d.translateBy (Vector3d.meters 0 0 1)
+                )
+            )
+        ]
+
+
+viewGoal : Assets -> ( GoalFrame, Float, Duration ) -> Scene3d.Entity Physics.WorldCoordinates
+viewGoal assets ( frame, hue, life ) =
+    let
+        holeColor =
+            Color.hsl hue 1.0 0.5
+    in
+    Scene3d.mesh
+        (Scene3d.Material.matte holeColor)
+        assets.goalRingMesh
+        |> Scene3d.scaleAbout Point3d.origin (0.9 * (Duration.inSeconds life / Duration.inSeconds goalLife))
+        -- |> Scene3d.scaleAbout Point3d.origin 0.9
+        |> Scene3d.placeIn frame
 
 
 wallPosX : Scene3d.Entity Physics.WorldCoordinates
