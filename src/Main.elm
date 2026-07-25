@@ -895,24 +895,53 @@ view3d model game =
 
         holeColor =
             Color.hsl holeHue 1.0 0.5
+
+        mainLight =
+            Scene3d.Light.point (Scene3d.Light.castsShadows True)
+                { chromaticity = Scene3d.Light.sunlight
+                , intensity = LuminousFlux.lumens 5000
+                , position =
+                    camera
+                        |> Camera3d.eyePoint
+                }
     in
     Scene3d.custom
         { lights =
-            Scene3d.twoLights
-                (Scene3d.Light.point (Scene3d.Light.castsShadows True)
-                    { chromaticity = Scene3d.Light.sunlight
-                    , intensity = LuminousFlux.lumens 5000
-                    , position =
-                        camera
-                            |> Camera3d.eyePoint
-                    }
-                )
-                (Scene3d.Light.point (Scene3d.Light.castsShadows False)
-                    { chromaticity = Scene3d.Light.color holeColor
-                    , intensity = LuminousFlux.lumens 250
-                    , position = Frame3d.originPoint holeFrame
-                    }
-                )
+            case game.previousGoals of
+                [] ->
+                    Scene3d.twoLights
+                        mainLight
+                        (goalLight game.currentGoal)
+
+                [ one ] ->
+                    Scene3d.threeLights
+                        mainLight
+                        (goalLight game.currentGoal)
+                        (prevGoalLight one)
+
+                [ one, two ] ->
+                    Scene3d.fourLights
+                        mainLight
+                        (goalLight game.currentGoal)
+                        (prevGoalLight one)
+                        (prevGoalLight two)
+
+                [ one, two, three ] ->
+                    Scene3d.fiveLights
+                        mainLight
+                        (goalLight game.currentGoal)
+                        (prevGoalLight one)
+                        (prevGoalLight two)
+                        (prevGoalLightNoShadoow three)
+
+                one :: two :: three :: four :: _ ->
+                    Scene3d.sixLights
+                        mainLight
+                        (goalLight game.currentGoal)
+                        (prevGoalLight one)
+                        (prevGoalLight two)
+                        (prevGoalLightNoShadoow three)
+                        (prevGoalLightNoShadoow four)
         , exposure = Scene3d.exposureValue 4
         , toneMapping = Scene3d.hableFilmicToneMapping
         , whiteBalance = Scene3d.Light.daylight
@@ -940,6 +969,51 @@ view3d model game =
             ]
                 ++ List.map (viewGoal game.assets) game.previousGoals
                 ++ game.floors
+        }
+
+
+goalLight : ( GoalFrame, Float ) -> Scene3d.Light.Light Physics.WorldCoordinates Bool
+goalLight ( frame, hue ) =
+    let
+        holeColor =
+            Color.hsl hue 1.0 0.5
+    in
+    Scene3d.Light.point (Scene3d.Light.castsShadows False)
+        { chromaticity = Scene3d.Light.color holeColor
+        , intensity = LuminousFlux.lumens 250
+        , position = Frame3d.originPoint frame
+        }
+
+
+prevGoalLight : ( GoalFrame, Float, Duration ) -> Scene3d.Light.Light Physics.WorldCoordinates Bool
+prevGoalLight ( frame, hue, life ) =
+    let
+        holeColor =
+            Color.hsl hue 1.0 0.5
+
+        lifeMagnitude =
+            Duration.inSeconds life / Duration.inSeconds goalLife
+    in
+    Scene3d.Light.point (Scene3d.Light.castsShadows False)
+        { chromaticity = Scene3d.Light.color holeColor
+        , intensity = LuminousFlux.lumens (250 * lifeMagnitude)
+        , position = Frame3d.originPoint frame
+        }
+
+
+prevGoalLightNoShadoow : ( GoalFrame, Float, Duration ) -> Scene3d.Light.Light Physics.WorldCoordinates Never
+prevGoalLightNoShadoow ( frame, hue, life ) =
+    let
+        holeColor =
+            Color.hsl hue 1.0 0.5
+
+        lifeMagnitude =
+            Duration.inSeconds life / Duration.inSeconds goalLife
+    in
+    Scene3d.Light.point Scene3d.Light.neverCastsShadows
+        { chromaticity = Scene3d.Light.color holeColor
+        , intensity = LuminousFlux.lumens (250 * lifeMagnitude)
+        , position = Frame3d.originPoint frame
         }
 
 
