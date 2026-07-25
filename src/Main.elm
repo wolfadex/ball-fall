@@ -1,4 +1,4 @@
-port module Main exposing (Flags, Id, Model, Msg, main)
+port module Main exposing (Flags, Game, Id, Model, Msg, main)
 
 import Angle
 import Block3d exposing (Block3d)
@@ -14,7 +14,7 @@ import Frame3d
 import Html exposing (Html)
 import Http
 import Json.Decode
-import Length exposing (Length)
+import Length
 import LuminousFlux
 import Obj.Decode
 import Physics exposing (onEarth)
@@ -130,6 +130,7 @@ init { initialSeed, width, height } =
     )
 
 
+meshResolver : Http.Resolver Http.Error (Scene3d.Mesh.Textured coordinates)
 meshResolver =
     Http.stringResolver
         (\response ->
