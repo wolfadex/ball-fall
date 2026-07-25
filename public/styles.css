@@ -53,6 +53,49 @@ button:focus-visible {
     font-size: 2rem;
 }
 
+.timer {
+    position: fixed;
+    top: 0.5rem;
+    right: 0.5rem;
+    color: white;
+    background-color: rgba(0, 0, 0, 0.25);
+    border-radius: 2rem;
+    padding: 0.5rem 1rem;
+    font-size: 2rem;
+}
+
+.paused {
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    color: white;
+    background-color: rgba(0, 0, 0, 0.25);
+    border-radius: 2rem;
+    padding: 0.5rem 1rem;
+    font-size: 4rem;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+}
+
+.timeRanOut {
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    color: white;
+    background-color: rgba(0, 0, 0, 0.25);
+    border-radius: 2rem;
+    padding: 0.5rem 1rem;
+    font-size: 4rem;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+}
+
 .mainMenu {
     width: 100vw;
     height: 100vh;

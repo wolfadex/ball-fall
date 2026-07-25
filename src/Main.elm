@@ -88,13 +88,20 @@ type alias LoadedGame =
     , currentGoal : ( GoalFrame, Float )
     , upcomingGoals : List GoalFrame
     , previousGoals : List ( GoalFrame, Float, Duration )
+    , remainingTime : Duration
     , stage : Stage
     }
 
 
 type Stage
     = MainMenu
-    | Playing
+    | Playing PlayState
+
+
+type PlayState
+    = Falling
+    | Paused
+    | TimeRanOut
 
 
 type alias GoalFrame =
@@ -355,6 +362,7 @@ subscriptions _ =
                 (Json.Decode.field "key" Json.Decode.string)
             )
         , Browser.Events.onResize BrowserResized
+        , Browser.Events.onVisibilityChange BrowserVisibilityChanged
         ]
 
 
@@ -373,7 +381,9 @@ type Msg
             )
         )
     | BrowserResized Int Int
+    | BrowserVisibilityChanged Browser.Events.Visibility
     | UserClickedStart
+    | UserUnpaused
     | Tick Duration
     | KeyDown String
     | KeyUp String
@@ -448,6 +458,7 @@ update msg model =
                                     )
                                 , upcomingGoals = []
                                 , previousGoals = []
+                                , remainingTime = initTimer
                                 }
                       }
                     , Cmd.none
@@ -461,95 +472,12 @@ update msg model =
                 Loaded game ->
                     case game.stage of
                         MainMenu ->
-                            let
-                                fl1 =
-                                    nextFloor 0 model.seed
+                            initNewGame model game
 
-                                fl2 =
-                                    nextFloor fl1.floorCount fl1.seed
+                        Playing TimeRanOut ->
+                            initNewGame model game
 
-                                fl3 =
-                                    nextFloor fl2.floorCount fl2.seed
-
-                                fl4 =
-                                    nextFloor fl3.floorCount fl3.seed
-
-                                fl5 =
-                                    nextFloor fl4.floorCount fl4.seed
-
-                                fl6 =
-                                    nextFloor fl5.floorCount fl5.seed
-
-                                fl7 =
-                                    nextFloor fl6.floorCount fl6.seed
-
-                                fl8 =
-                                    nextFloor fl7.floorCount fl7.seed
-                            in
-                            ( { model
-                                | game =
-                                    Loaded
-                                        { stage = Playing
-                                        , player = initPlayer
-                                        , bodies =
-                                            initWalls
-                                                ++ fl1.bodies
-                                                ++ fl2.bodies
-                                                ++ fl3.bodies
-                                                ++ fl4.bodies
-                                                ++ fl5.bodies
-                                                ++ fl6.bodies
-                                                ++ fl7.bodies
-                                                ++ fl8.bodies
-                                        , contacts = Physics.emptyContacts
-                                        , timestep = initTimestep
-                                        , floors =
-                                            [ fl1.entity
-                                            , fl2.entity
-                                            , fl3.entity
-                                            , fl4.entity
-                                            , fl5.entity
-                                            , fl6.entity
-                                            , fl7.entity
-                                            , fl8.entity
-                                            ]
-                                        , floorCount = fl8.floorCount
-                                        , keysDown = Set.empty
-                                        , assets = game.assets
-                                        , currentGoal =
-                                            let
-                                                ( holeX, holeY ) =
-                                                    fl1.hole
-                                            in
-                                            ( Frame3d.atPoint
-                                                (Point3d.meters holeX holeY 0)
-                                            , 0
-                                            )
-                                        , upcomingGoals =
-                                            List.indexedMap
-                                                (\index ( holeX, holeY ) ->
-                                                    Frame3d.atPoint
-                                                        (Point3d.meters
-                                                            holeX
-                                                            holeY
-                                                            (toFloat (index + 1) * floorSpacing)
-                                                        )
-                                                )
-                                                [ fl2.hole
-                                                , fl3.hole
-                                                , fl4.hole
-                                                , fl5.hole
-                                                , fl6.hole
-                                                , fl7.hole
-                                                , fl8.hole
-                                                ]
-                                        , previousGoals = []
-                                        }
-                              }
-                            , Cmd.none
-                            )
-
-                        Playing ->
+                        Playing _ ->
                             ( model, Cmd.none )
 
                 _ ->
@@ -562,36 +490,75 @@ update msg model =
                         MainMenu ->
                             ( model, Cmd.none )
 
-                        Playing ->
-                            let
-                                ( nextGame, nextModel ) =
-                                    updateFloors delta
-                                        (Timestep.advance simulateStep delta game)
-                                        model
+                        Playing TimeRanOut ->
+                            ( model, Cmd.none )
 
-                                sounds =
-                                    nextGame.contacts
-                                        |> Physics.contactPoints (\id1 id2 -> id1 == Ball || id2 == Ball)
-                                        |> List.foldl
-                                            (\( _, _, contacts ) ->
-                                                (++)
-                                                    (List.filterMap
-                                                        (\{ impulse } ->
-                                                            if Quantity.unwrap impulse > 45 then
-                                                                Just (playSound { sound = "wood_hit" })
+                        Playing Paused ->
+                            ( model, Cmd.none )
 
-                                                            else
-                                                                Nothing
+                        Playing Falling ->
+                            if Quantity.lessThanOrEqualToZero game.remainingTime then
+                                ( { model | game = Loaded { game | stage = Playing TimeRanOut } }, Cmd.none )
+
+                            else
+                                let
+                                    ( nextGame, nextModel ) =
+                                        updateFloors delta
+                                            (Timestep.advance simulateStep delta game)
+                                            model
+
+                                    sounds =
+                                        nextGame.contacts
+                                            |> Physics.contactPoints (\id1 id2 -> id1 == Ball || id2 == Ball)
+                                            |> List.foldl
+                                                (\( _, _, contacts ) ->
+                                                    (++)
+                                                        (List.filterMap
+                                                            (\{ impulse } ->
+                                                                if Quantity.unwrap impulse > 45 then
+                                                                    Just (playSound { sound = "wood_hit" })
+
+                                                                else
+                                                                    Nothing
+                                                            )
+                                                            contacts
                                                         )
-                                                        contacts
-                                                    )
-                                            )
-                                            []
-                            in
-                            ( nextModel
-                            , sounds
-                                |> Cmd.batch
-                            )
+                                                )
+                                                []
+                                in
+                                ( nextModel
+                                , sounds
+                                    |> Cmd.batch
+                                )
+
+                _ ->
+                    ( model, Cmd.none )
+
+        BrowserVisibilityChanged Browser.Events.Visible ->
+            ( model, Cmd.none )
+
+        BrowserVisibilityChanged Browser.Events.Hidden ->
+            case model.game of
+                Loaded game ->
+                    case game.stage of
+                        Playing Falling ->
+                            ( { model | game = Loaded { game | stage = Playing Paused } }, Cmd.none )
+
+                        _ ->
+                            ( model, Cmd.none )
+
+                _ ->
+                    ( model, Cmd.none )
+
+        UserUnpaused ->
+            case model.game of
+                Loaded game ->
+                    case game.stage of
+                        Playing Paused ->
+                            ( { model | game = Loaded { game | stage = Playing Falling } }, Cmd.none )
+
+                        _ ->
+                            ( model, Cmd.none )
 
                 _ ->
                     ( model, Cmd.none )
@@ -599,7 +566,19 @@ update msg model =
         KeyDown key ->
             case model.game of
                 Loaded game ->
-                    ( { model | game = Loaded { game | keysDown = Set.insert key game.keysDown } }, Cmd.none )
+                    if key == "Escape" then
+                        case game.stage of
+                            Playing Paused ->
+                                ( { model | game = Loaded { game | stage = Playing Falling } }, Cmd.none )
+
+                            Playing Falling ->
+                                ( { model | game = Loaded { game | stage = Playing Paused } }, Cmd.none )
+
+                            _ ->
+                                ( model, Cmd.none )
+
+                    else
+                        ( { model | game = Loaded { game | keysDown = Set.insert key game.keysDown } }, Cmd.none )
 
                 _ ->
                     ( model, Cmd.none )
@@ -611,6 +590,103 @@ update msg model =
 
                 _ ->
                     ( model, Cmd.none )
+
+
+initNewGame : Model -> LoadedGame -> ( Model, Cmd Msg )
+initNewGame model game =
+    let
+        fl1 =
+            nextFloor 0 model.seed
+
+        fl2 =
+            nextFloor fl1.floorCount fl1.seed
+
+        fl3 =
+            nextFloor fl2.floorCount fl2.seed
+
+        fl4 =
+            nextFloor fl3.floorCount fl3.seed
+
+        fl5 =
+            nextFloor fl4.floorCount fl4.seed
+
+        fl6 =
+            nextFloor fl5.floorCount fl5.seed
+
+        fl7 =
+            nextFloor fl6.floorCount fl6.seed
+
+        fl8 =
+            nextFloor fl7.floorCount fl7.seed
+    in
+    ( { model
+        | game =
+            Loaded
+                { stage = Playing Falling
+                , player = initPlayer
+                , bodies =
+                    initWalls
+                        ++ fl1.bodies
+                        ++ fl2.bodies
+                        ++ fl3.bodies
+                        ++ fl4.bodies
+                        ++ fl5.bodies
+                        ++ fl6.bodies
+                        ++ fl7.bodies
+                        ++ fl8.bodies
+                , contacts = Physics.emptyContacts
+                , timestep = initTimestep
+                , floors =
+                    [ fl1.entity
+                    , fl2.entity
+                    , fl3.entity
+                    , fl4.entity
+                    , fl5.entity
+                    , fl6.entity
+                    , fl7.entity
+                    , fl8.entity
+                    ]
+                , floorCount = fl8.floorCount
+                , keysDown = Set.empty
+                , assets = game.assets
+                , currentGoal =
+                    let
+                        ( holeX, holeY ) =
+                            fl1.hole
+                    in
+                    ( Frame3d.atPoint
+                        (Point3d.meters holeX holeY 0)
+                    , 0
+                    )
+                , upcomingGoals =
+                    List.indexedMap
+                        (\index ( holeX, holeY ) ->
+                            Frame3d.atPoint
+                                (Point3d.meters
+                                    holeX
+                                    holeY
+                                    (toFloat (index + 1) * floorSpacing)
+                                )
+                        )
+                        [ fl2.hole
+                        , fl3.hole
+                        , fl4.hole
+                        , fl5.hole
+                        , fl6.hole
+                        , fl7.hole
+                        , fl8.hole
+                        ]
+                , previousGoals = []
+                , remainingTime = initTimer
+                }
+      }
+    , Cmd.none
+    )
+
+
+initTimer : Duration
+initTimer =
+    Duration.seconds 30
 
 
 initPlayer : Physics.Body
@@ -741,6 +817,7 @@ updateFloors delta game model =
                              )
                                 :: game.previousGoals
                             )
+                    , remainingTime = game.remainingTime |> Quantity.minus delta
                 }
         in
         ( nextGame
@@ -775,6 +852,7 @@ updateFloors delta game model =
                             List.filterMap
                                 (animateGoals delta)
                                 game.previousGoals
+                        , remainingTime = game.remainingTime |> Quantity.minus delta
                     }
           }
         )
@@ -948,7 +1026,7 @@ viewGame model game =
         MainMenu ->
             viewMainMenu
 
-        Playing ->
+        Playing state ->
             [ view3d model game
             , game.player
                 |> Physics.frame
@@ -961,6 +1039,34 @@ viewGame model game =
                         Html.span [ Css.score ]
                             [ Html.text ("Score: " ++ z) ]
                    )
+            , game.remainingTime
+                |> Duration.inSeconds
+                |> ceiling
+                |> String.fromInt
+                |> (\z ->
+                        Html.span [ Css.timer ]
+                            [ Html.text (z ++ "s") ]
+                   )
+            , case state of
+                Falling ->
+                    Html.text ""
+
+                Paused ->
+                    Html.span
+                        [ Css.paused ]
+                        [ Html.text "PAUSED"
+                        , Html.button
+                            [ Html.Events.onClick UserUnpaused ]
+                            [ Html.text "Resume" ]
+                        ]
+
+                TimeRanOut ->
+                    Html.div [ Css.timeRanOut ]
+                        [ Html.text "Time ran out"
+                        , Html.button
+                            [ Html.Events.onClick UserClickedStart ]
+                            [ Html.text "Drop-in again" ]
+                        ]
             ]
 
 
@@ -969,6 +1075,8 @@ viewMainMenu =
     [ Html.div
         [ Css.mainMenu ]
         [ Html.h1 [] [ Html.text "Ball Fall" ]
+        , Html.h3 []
+            [ Html.text "Can you get the lowest score?" ]
         , Html.button
             [ Html.Events.onClick UserClickedStart ]
             [ Html.span [] [ Html.text "Drop-in" ] ]
