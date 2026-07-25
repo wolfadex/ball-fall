@@ -61,174 +61,107 @@ type Id
 
 
 type alias Model =
+    { seed : Random.Seed
+    , width : Int
+    , height : Int
+    , game : Game
+    }
+
+
+type Game
+    = Loading
+    | Failure String
+    | Loaded LoadedGame
+
+
+type alias LoadedGame =
     { player : Physics.Body
     , bodies : List ( Id, Physics.Body )
     , contacts : Physics.Contacts Id
     , timestep : Timestep
     , floors : List (Scene3d.Entity Physics.WorldCoordinates)
-    , seed : Random.Seed
-    , width : Int
-    , height : Int
     , floorCount : Int
     , keysDown : Set String
-    , ballAssets : Maybe CustomMesh
+    , assets : Assets
     }
 
 
-type alias CustomMesh =
-    ( Scene3d.Mesh.Textured Physics.BodyCoordinates
-    , Scene3d.Mesh.Shadow Physics.BodyCoordinates
-    , Scene3d.Material.Textured Physics.BodyCoordinates
-    )
+type alias Assets =
+    { ballMesh : Scene3d.Mesh.Textured Physics.BodyCoordinates
+    , ballShadow : Scene3d.Mesh.Shadow Physics.BodyCoordinates
+    , ballMaterial : Scene3d.Material.Textured Physics.BodyCoordinates
+    , holeMesh : Scene3d.Mesh.Textured Physics.BodyCoordinates
+    , holeShadow : Scene3d.Mesh.Shadow Physics.BodyCoordinates
+    }
 
 
 init : Flags -> ( Model, Cmd Msg )
 init { initialSeed, width, height } =
-    let
-        fl1 =
-            nextFloor 0 (Random.initialSeed initialSeed)
-
-        fl2 =
-            nextFloor fl1.floorCount fl1.seed
-
-        fl3 =
-            nextFloor fl2.floorCount fl2.seed
-
-        fl4 =
-            nextFloor fl3.floorCount fl3.seed
-
-        fl5 =
-            nextFloor fl4.floorCount fl4.seed
-
-        fl6 =
-            nextFloor fl5.floorCount fl5.seed
-
-        fl7 =
-            nextFloor fl6.floorCount fl6.seed
-
-        fl8 =
-            nextFloor fl7.floorCount fl7.seed
-    in
-    ( { player =
-            Physics.sphere
-                playerSphere
-                (Physics.Material.dense
-                    { density = Density.kilogramsPerCubicMeter 900
-                    , friction = 0.9
-                    , bounciness = 0.1
-                    }
-                )
-                |> Physics.translateBy (Vector3d.meters 0 0 2)
-                |> Physics.damp
-                    { linear = 0.01
-                    , angular = 0.5
-                    }
-      , bodies =
-            [ ( Wall
-              , Physics.plane
-                    (Plane3d.yz
-                        |> Plane3d.flip
-                        |> Plane3d.translateBy (Vector3d.meters maxExtent 0 0)
-                    )
-                    Physics.Material.wood
-              )
-            , ( Wall
-              , Physics.plane
-                    (Plane3d.yz
-                        |> Plane3d.translateBy (Vector3d.meters -maxExtent 0 0)
-                    )
-                    Physics.Material.wood
-              )
-            , ( Wall
-              , Physics.plane
-                    (Plane3d.zx
-                        |> Plane3d.flip
-                        |> Plane3d.translateBy (Vector3d.meters 0 maxExtent 0)
-                    )
-                    Physics.Material.wood
-              )
-            , ( Wall
-              , Physics.plane
-                    (Plane3d.zx
-                        |> Plane3d.translateBy (Vector3d.meters 0 -maxExtent 0)
-                    )
-                    Physics.Material.wood
-              )
-            ]
-                ++ fl1.bodies
-                ++ fl2.bodies
-                ++ fl3.bodies
-                ++ fl4.bodies
-                ++ fl5.bodies
-                ++ fl6.bodies
-                ++ fl7.bodies
-                ++ fl8.bodies
-      , contacts = Physics.emptyContacts
-      , timestep = initTimestep
-      , floors =
-            [ fl1.entity
-            , fl2.entity
-            , fl3.entity
-            , fl4.entity
-            , fl5.entity
-            , fl6.entity
-            , fl7.entity
-            , fl8.entity
-            ]
-      , floorCount = fl8.floorCount
-      , seed = fl8.seed
+    ( { seed = Random.initialSeed initialSeed
       , width = width
       , height = height
-      , keysDown = Set.empty
-      , ballAssets = Nothing
+      , game = Loading
       }
-    , Task.map2 Tuple.pair
+    , Task.map3 (\a b c -> ( a, b, c ))
         (Http.task
             { method = "GET"
             , headers = []
             , url = "/assets/ball.obj"
             , body = Http.emptyBody
-            , resolver =
-                Http.stringResolver
-                    (\response ->
-                        case response of
-                            Http.BadUrl_ url ->
-                                Err (Http.BadUrl url)
-
-                            Http.Timeout_ ->
-                                Err Http.Timeout
-
-                            Http.NetworkError_ ->
-                                Err Http.NetworkError
-
-                            Http.BadStatus_ metadata _ ->
-                                Err (Http.BadStatus metadata.statusCode)
-
-                            Http.GoodStatus_ _ body ->
-                                let
-                                    units =
-                                        Length.meters
-
-                                    decoder =
-                                        Obj.Decode.map Scene3d.Mesh.texturedFaces
-                                            (Obj.Decode.texturedFacesIn Frame3d.atOrigin)
-                                in
-                                case Obj.Decode.decodeString units decoder body of
-                                    Ok value ->
-                                        Ok value
-
-                                    Err string ->
-                                        Err (Http.BadBody string)
-                    )
+            , resolver = meshResolver
             , timeout = Nothing
             }
-            |> Task.mapError (\_ -> "Failed to load obj")
+            |> Task.mapError (\_ -> "Failed to load ball obj")
         )
         (Scene3d.Material.load "/assets/ball.png"
             |> Task.mapError (\_ -> "Failed to load texture")
         )
-        |> Task.attempt BallLoaded
+        (Http.task
+            { method = "GET"
+            , headers = []
+            , url = "/assets/hole.obj"
+            , body = Http.emptyBody
+            , resolver = meshResolver
+            , timeout = Nothing
+            }
+            |> Task.mapError (\_ -> "Failed to load hole obj")
+        )
+        |> Task.attempt AssetsLoaded
     )
+
+
+meshResolver =
+    Http.stringResolver
+        (\response ->
+            case response of
+                Http.BadUrl_ url ->
+                    Err (Http.BadUrl url)
+
+                Http.Timeout_ ->
+                    Err Http.Timeout
+
+                Http.NetworkError_ ->
+                    Err Http.NetworkError
+
+                Http.BadStatus_ metadata _ ->
+                    Err (Http.BadStatus metadata.statusCode)
+
+                Http.GoodStatus_ _ body ->
+                    let
+                        units =
+                            Length.meters
+
+                        decoder =
+                            Obj.Decode.map Scene3d.Mesh.texturedFaces
+                                (Obj.Decode.texturedFacesIn Frame3d.atOrigin)
+                    in
+                    case Obj.Decode.decodeString units decoder body of
+                        Ok value ->
+                            Ok value
+
+                        Err string ->
+                            Err (Http.BadBody string)
+        )
 
 
 nextFloor :
@@ -411,9 +344,16 @@ port playSound : { sound : String } -> Cmd msg
 
 
 type Msg
-    = Tick Duration
-    | BallLoaded (Result String ( Scene3d.Mesh.Textured Physics.BodyCoordinates, Scene3d.Material.Texture Color ))
+    = AssetsLoaded
+        (Result
+            String
+            ( Scene3d.Mesh.Textured Physics.BodyCoordinates
+            , Scene3d.Material.Texture Color
+            , Scene3d.Mesh.Textured Physics.BodyCoordinates
+            )
+        )
     | BrowserResized Int Int
+    | Tick Duration
     | KeyDown String
     | KeyUp String
 
@@ -424,56 +364,179 @@ update msg model =
         BrowserResized width height ->
             ( { model | width = width, height = height }, Cmd.none )
 
-        BallLoaded (Err _) ->
-            ( model, Cmd.none )
+        AssetsLoaded (Err err) ->
+            case model.game of
+                Loading ->
+                    ( { model | game = Failure err }, Cmd.none )
 
-        BallLoaded (Ok ( mesh, texture )) ->
-            ( { model
-                | ballAssets =
-                    Just
-                        ( mesh
-                        , Scene3d.Mesh.shadow mesh
-                        , Scene3d.Material.texturedMatte texture
-                        )
-              }
-            , Cmd.none
-            )
+                _ ->
+                    ( model, Cmd.none )
+
+        AssetsLoaded (Ok ( ballMesh, ballTexture, holeMesh )) ->
+            case model.game of
+                Loading ->
+                    let
+                        fl1 =
+                            nextFloor 0 model.seed
+
+                        fl2 =
+                            nextFloor fl1.floorCount fl1.seed
+
+                        fl3 =
+                            nextFloor fl2.floorCount fl2.seed
+
+                        fl4 =
+                            nextFloor fl3.floorCount fl3.seed
+
+                        fl5 =
+                            nextFloor fl4.floorCount fl4.seed
+
+                        fl6 =
+                            nextFloor fl5.floorCount fl5.seed
+
+                        fl7 =
+                            nextFloor fl6.floorCount fl6.seed
+
+                        fl8 =
+                            nextFloor fl7.floorCount fl7.seed
+                    in
+                    ( { model
+                        | game =
+                            Loaded
+                                { player =
+                                    Physics.sphere
+                                        playerSphere
+                                        (Physics.Material.dense
+                                            { density = Density.kilogramsPerCubicMeter 900
+                                            , friction = 0.9
+                                            , bounciness = 0.1
+                                            }
+                                        )
+                                        |> Physics.translateBy (Vector3d.meters 0 0 2)
+                                        |> Physics.damp
+                                            { linear = 0.01
+                                            , angular = 0.5
+                                            }
+                                , bodies =
+                                    [ ( Wall
+                                      , Physics.plane
+                                            (Plane3d.yz
+                                                |> Plane3d.flip
+                                                |> Plane3d.translateBy (Vector3d.meters maxExtent 0 0)
+                                            )
+                                            Physics.Material.wood
+                                      )
+                                    , ( Wall
+                                      , Physics.plane
+                                            (Plane3d.yz
+                                                |> Plane3d.translateBy (Vector3d.meters -maxExtent 0 0)
+                                            )
+                                            Physics.Material.wood
+                                      )
+                                    , ( Wall
+                                      , Physics.plane
+                                            (Plane3d.zx
+                                                |> Plane3d.flip
+                                                |> Plane3d.translateBy (Vector3d.meters 0 maxExtent 0)
+                                            )
+                                            Physics.Material.wood
+                                      )
+                                    , ( Wall
+                                      , Physics.plane
+                                            (Plane3d.zx
+                                                |> Plane3d.translateBy (Vector3d.meters 0 -maxExtent 0)
+                                            )
+                                            Physics.Material.wood
+                                      )
+                                    ]
+                                        ++ fl1.bodies
+                                        ++ fl2.bodies
+                                        ++ fl3.bodies
+                                        ++ fl4.bodies
+                                        ++ fl5.bodies
+                                        ++ fl6.bodies
+                                        ++ fl7.bodies
+                                        ++ fl8.bodies
+                                , contacts = Physics.emptyContacts
+                                , timestep = initTimestep
+                                , floors =
+                                    [ fl1.entity
+                                    , fl2.entity
+                                    , fl3.entity
+                                    , fl4.entity
+                                    , fl5.entity
+                                    , fl6.entity
+                                    , fl7.entity
+                                    , fl8.entity
+                                    ]
+                                , floorCount = fl8.floorCount
+                                , keysDown = Set.empty
+                                , assets =
+                                    { ballMesh = ballMesh
+                                    , ballShadow = Scene3d.Mesh.shadow ballMesh
+                                    , ballMaterial = Scene3d.Material.texturedMatte ballTexture
+                                    , holeMesh = holeMesh
+                                    , holeShadow = Scene3d.Mesh.shadow holeMesh
+                                    }
+                                }
+                      }
+                    , Cmd.none
+                    )
+
+                _ ->
+                    ( model, Cmd.none )
 
         Tick delta ->
-            let
-                nextModel =
-                    Timestep.advance simulateStep delta model
-                        |> updateFloors
+            case model.game of
+                Loaded game ->
+                    let
+                        ( nextGame, nextModel ) =
+                            updateFloors
+                                (Timestep.advance simulateStep delta game)
+                                model
 
-                sounds =
-                    nextModel.contacts
-                        |> Physics.contactPoints (\id1 id2 -> id1 == Ball || id2 == Ball)
-                        |> List.foldl
-                            (\( _, _, contacts ) ->
-                                (++)
-                                    (List.filterMap
-                                        (\{ impulse } ->
-                                            if Quantity.unwrap impulse > 45 then
-                                                Just (playSound { sound = "wood_hit" })
+                        sounds =
+                            nextGame.contacts
+                                |> Physics.contactPoints (\id1 id2 -> id1 == Ball || id2 == Ball)
+                                |> List.foldl
+                                    (\( _, _, contacts ) ->
+                                        (++)
+                                            (List.filterMap
+                                                (\{ impulse } ->
+                                                    if Quantity.unwrap impulse > 45 then
+                                                        Just (playSound { sound = "wood_hit" })
 
-                                            else
-                                                Nothing
-                                        )
-                                        contacts
+                                                    else
+                                                        Nothing
+                                                )
+                                                contacts
+                                            )
                                     )
-                            )
-                            []
-            in
-            ( nextModel
-            , sounds
-                |> Cmd.batch
-            )
+                                    []
+                    in
+                    ( nextModel
+                    , sounds
+                        |> Cmd.batch
+                    )
+
+                _ ->
+                    ( model, Cmd.none )
 
         KeyDown key ->
-            ( { model | keysDown = Set.insert key model.keysDown }, Cmd.none )
+            case model.game of
+                Loaded game ->
+                    ( { model | game = Loaded { game | keysDown = Set.insert key game.keysDown } }, Cmd.none )
+
+                _ ->
+                    ( model, Cmd.none )
 
         KeyUp key ->
-            ( { model | keysDown = Set.remove key model.keysDown }, Cmd.none )
+            case model.game of
+                Loaded game ->
+                    ( { model | game = Loaded { game | keysDown = Set.remove key game.keysDown } }, Cmd.none )
+
+                _ ->
+                    ( model, Cmd.none )
 
 
 maxFloors : Int
@@ -481,58 +544,65 @@ maxFloors =
     8
 
 
-updateFloors : Model -> Model
-updateFloors model =
-    if Length.inMeters (Point3d.zCoordinate (Frame3d.originPoint (Physics.frame model.player))) < (toFloat (model.floorCount - maxFloors) * floorSpacing) then
+updateFloors : LoadedGame -> Model -> ( LoadedGame, Model )
+updateFloors game model =
+    if Length.inMeters (Point3d.zCoordinate (Frame3d.originPoint (Physics.frame game.player))) < (toFloat (game.floorCount - maxFloors) * floorSpacing) then
         let
             newFloor =
-                nextFloor model.floorCount model.seed
+                nextFloor game.floorCount model.seed
+
+            nextGame =
+                { game
+                    | floorCount = newFloor.floorCount
+                    , floors =
+                        case game.floors of
+                            [] ->
+                                game.floors
+
+                            _ :: restFloors ->
+                                restFloors ++ [ newFloor.entity ]
+                    , bodies =
+                        newFloor.bodies
+                            ++ List.filter
+                                (\( id, _ ) ->
+                                    case id of
+                                        FloorPiece height ->
+                                            height > (game.floorCount - maxFloors)
+
+                                        _ ->
+                                            True
+                                )
+                                game.bodies
+                }
         in
-        { model
+        ( nextGame
+        , { model
             | seed = newFloor.seed
-            , floorCount = newFloor.floorCount
-            , floors =
-                case model.floors of
-                    [] ->
-                        model.floors
-
-                    _ :: restFloors ->
-                        restFloors ++ [ newFloor.entity ]
-            , bodies =
-                newFloor.bodies
-                    ++ List.filter
-                        (\( id, _ ) ->
-                            case id of
-                                FloorPiece height ->
-                                    height > (model.floorCount - maxFloors)
-
-                                _ ->
-                                    True
-                        )
-                        model.bodies
-        }
+            , game = Loaded nextGame
+          }
+        )
 
     else
-        model
+        ( game, { model | game = Loaded game } )
 
 
-simulateStep : Model -> Model
-simulateStep model =
+simulateStep : LoadedGame -> LoadedGame
+simulateStep game =
     let
         ( newBodies, newContacts ) =
             Physics.simulate
                 { onEarth
-                    | contacts = model.contacts
-                    , duration = Timestep.duration model.timestep
+                    | contacts = game.contacts
+                    , duration = Timestep.duration game.timestep
                 }
-                (( Ball, updatePlayerBall model.keysDown model.player )
-                    :: model.bodies
+                (( Ball, updatePlayerBall game.keysDown game.player )
+                    :: game.bodies
                 )
 
         ( player, bodies ) =
-            extractPlayer model.player newBodies
+            extractPlayer game.player newBodies
     in
-    { model
+    { game
         | player = player
         , bodies = bodies
         , contacts = newContacts
@@ -637,27 +707,35 @@ view : Model -> Browser.Document Msg
 view model =
     { title = "Ball Fall"
     , body =
-        [ view3d model
-        , model.player
-            |> Physics.frame
-            |> Frame3d.originPoint
-            |> Point3d.zCoordinate
-            |> Length.inMeters
-            |> floor
-            |> String.fromInt
-            |> (\z ->
-                    Html.span [ Css.score ]
-                        [ Html.text ("Score: " ++ z) ]
-               )
-        ]
+        case model.game of
+            Loading ->
+                [ Html.text "Loading..." ]
+
+            Failure err ->
+                [ Html.text err ]
+
+            Loaded game ->
+                [ view3d model game
+                , game.player
+                    |> Physics.frame
+                    |> Frame3d.originPoint
+                    |> Point3d.zCoordinate
+                    |> Length.inMeters
+                    |> floor
+                    |> String.fromInt
+                    |> (\z ->
+                            Html.span [ Css.score ]
+                                [ Html.text ("Score: " ++ z) ]
+                       )
+                ]
     }
 
 
-view3d : Model -> Html Msg
-view3d model =
+view3d : Model -> LoadedGame -> Html Msg
+view3d model game =
     let
         playerPosition =
-            model.player
+            game.player
                 |> Physics.frame
                 |> Frame3d.originPoint
 
@@ -690,25 +768,18 @@ view3d model =
         , clipDepth = Length.millimeters 2
         , background = Scene3d.backgroundColor Color.black
         , entities =
-            [ Scene3d.placeIn (Physics.frame model.player) <|
-                case model.ballAssets of
-                    Nothing ->
-                        Scene3d.sphereWithShadow
-                            (Scene3d.Material.matte Color.green)
-                            playerSphere
-
-                    Just ( mesh, meshShadow, material ) ->
-                        Scene3d.meshWithShadow
-                            material
-                            mesh
-                            meshShadow
-                            |> Scene3d.scaleAbout Point3d.origin 0.25
+            [ Scene3d.meshWithShadow
+                game.assets.ballMaterial
+                game.assets.ballMesh
+                game.assets.ballShadow
+                |> Scene3d.scaleAbout Point3d.origin 0.25
+                |> Scene3d.placeIn (Physics.frame game.player)
             , wallPosX
             , wallNegX playerZ
             , wallPosY
             , wallNegY playerZ
             ]
-                ++ model.floors
+                ++ game.floors
         }
 
 
@@ -726,7 +797,7 @@ wallPosX =
 wallNegX : Float -> Scene3d.Entity Physics.WorldCoordinates
 wallNegX playerZ =
     Scene3d.quadWithShadow
-        (Scene3d.Material.matte Color.gray)
+        (Scene3d.Material.matte (Color.rgb 0.8 0.75 0.8))
         (Point3d.meters (-maxExtent - 0.01) (maxExtent + 0.01) (-60 + playerZ))
         (Point3d.meters (-maxExtent - 0.01) (-maxExtent - 0.01) (-60 + playerZ))
         (Point3d.meters (-maxExtent - 0.01) (-maxExtent - 0.01) (10 + playerZ))
@@ -747,7 +818,7 @@ wallPosY =
 wallNegY : Float -> Scene3d.Entity Physics.WorldCoordinates
 wallNegY playerZ =
     Scene3d.quadWithShadow
-        (Scene3d.Material.matte Color.gray)
+        (Scene3d.Material.matte (Color.rgb 0.75 0.75 0.8))
         (Point3d.meters (-maxExtent - 0.01) (-maxExtent - 0.01) (-60 + playerZ))
         (Point3d.meters (maxExtent + 0.01) (-maxExtent - 0.01) (-60 + playerZ))
         (Point3d.meters (maxExtent + 0.01) (-maxExtent - 0.01) (10 + playerZ))
