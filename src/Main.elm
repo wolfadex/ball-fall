@@ -12,6 +12,7 @@ import Direction3d
 import Duration exposing (Duration)
 import Frame3d exposing (Frame3d)
 import Html exposing (Html)
+import Html.Events
 import Http
 import Json.Decode
 import Length
@@ -87,7 +88,13 @@ type alias LoadedGame =
     , currentGoal : ( GoalFrame, Float )
     , upcomingGoals : List GoalFrame
     , previousGoals : List ( GoalFrame, Float, Duration )
+    , stage : Stage
     }
+
+
+type Stage
+    = MainMenu
+    | Playing
 
 
 type alias GoalFrame =
@@ -366,6 +373,7 @@ type Msg
             )
         )
     | BrowserResized Int Int
+    | UserClickedStart
     | Tick Duration
     | KeyDown String
     | KeyUp String
@@ -425,102 +433,20 @@ update msg model =
                     ( { model
                         | game =
                             Loaded
-                                { player =
-                                    Physics.sphere
-                                        playerSphere
-                                        (Physics.Material.dense
-                                            { density = Density.kilogramsPerCubicMeter 900
-                                            , friction = 0.9
-                                            , bounciness = 0.1
-                                            }
-                                        )
-                                        |> Physics.translateBy (Vector3d.meters 0 0 2)
-                                        |> Physics.damp
-                                            { linear = 0.01
-                                            , angular = 0.5
-                                            }
-                                , bodies =
-                                    [ ( Wall
-                                      , Physics.plane
-                                            (Plane3d.yz
-                                                |> Plane3d.flip
-                                                |> Plane3d.translateBy (Vector3d.meters maxExtent 0 0)
-                                            )
-                                            Physics.Material.wood
-                                      )
-                                    , ( Wall
-                                      , Physics.plane
-                                            (Plane3d.yz
-                                                |> Plane3d.translateBy (Vector3d.meters -maxExtent 0 0)
-                                            )
-                                            Physics.Material.wood
-                                      )
-                                    , ( Wall
-                                      , Physics.plane
-                                            (Plane3d.zx
-                                                |> Plane3d.flip
-                                                |> Plane3d.translateBy (Vector3d.meters 0 maxExtent 0)
-                                            )
-                                            Physics.Material.wood
-                                      )
-                                    , ( Wall
-                                      , Physics.plane
-                                            (Plane3d.zx
-                                                |> Plane3d.translateBy (Vector3d.meters 0 -maxExtent 0)
-                                            )
-                                            Physics.Material.wood
-                                      )
-                                    ]
-                                        ++ fl1.bodies
-                                        ++ fl2.bodies
-                                        ++ fl3.bodies
-                                        ++ fl4.bodies
-                                        ++ fl5.bodies
-                                        ++ fl6.bodies
-                                        ++ fl7.bodies
-                                        ++ fl8.bodies
+                                { stage = MainMenu
+                                , player = initPlayer
+                                , bodies = []
                                 , contacts = Physics.emptyContacts
                                 , timestep = initTimestep
-                                , floors =
-                                    [ fl1.entity
-                                    , fl2.entity
-                                    , fl3.entity
-                                    , fl4.entity
-                                    , fl5.entity
-                                    , fl6.entity
-                                    , fl7.entity
-                                    , fl8.entity
-                                    ]
-                                , floorCount = fl8.floorCount
+                                , floors = []
+                                , floorCount = 0
                                 , keysDown = Set.empty
                                 , assets = assets
                                 , currentGoal =
-                                    let
-                                        ( holeX, holeY ) =
-                                            fl1.hole
-                                    in
-                                    ( Frame3d.atPoint
-                                        (Point3d.meters holeX holeY 0)
+                                    ( Frame3d.atOrigin
                                     , 0
                                     )
-                                , upcomingGoals =
-                                    List.indexedMap
-                                        (\index ( holeX, holeY ) ->
-                                            Frame3d.atPoint
-                                                (Point3d.meters
-                                                    holeX
-                                                    holeY
-                                                    (toFloat (index + 1) * floorSpacing)
-                                                )
-                                        )
-                                        [ fl2.hole
-                                        , fl3.hole
-                                        , fl4.hole
-                                        , fl5.hole
-                                        , fl6.hole
-                                        , fl7.hole
-                                        , fl8.hole
-                                        ]
+                                , upcomingGoals = []
                                 , previousGoals = []
                                 }
                       }
@@ -530,38 +456,142 @@ update msg model =
                 _ ->
                     ( model, Cmd.none )
 
+        UserClickedStart ->
+            case model.game of
+                Loaded game ->
+                    case game.stage of
+                        MainMenu ->
+                            let
+                                fl1 =
+                                    nextFloor 0 model.seed
+
+                                fl2 =
+                                    nextFloor fl1.floorCount fl1.seed
+
+                                fl3 =
+                                    nextFloor fl2.floorCount fl2.seed
+
+                                fl4 =
+                                    nextFloor fl3.floorCount fl3.seed
+
+                                fl5 =
+                                    nextFloor fl4.floorCount fl4.seed
+
+                                fl6 =
+                                    nextFloor fl5.floorCount fl5.seed
+
+                                fl7 =
+                                    nextFloor fl6.floorCount fl6.seed
+
+                                fl8 =
+                                    nextFloor fl7.floorCount fl7.seed
+                            in
+                            ( { model
+                                | game =
+                                    Loaded
+                                        { stage = Playing
+                                        , player = initPlayer
+                                        , bodies =
+                                            initWalls
+                                                ++ fl1.bodies
+                                                ++ fl2.bodies
+                                                ++ fl3.bodies
+                                                ++ fl4.bodies
+                                                ++ fl5.bodies
+                                                ++ fl6.bodies
+                                                ++ fl7.bodies
+                                                ++ fl8.bodies
+                                        , contacts = Physics.emptyContacts
+                                        , timestep = initTimestep
+                                        , floors =
+                                            [ fl1.entity
+                                            , fl2.entity
+                                            , fl3.entity
+                                            , fl4.entity
+                                            , fl5.entity
+                                            , fl6.entity
+                                            , fl7.entity
+                                            , fl8.entity
+                                            ]
+                                        , floorCount = fl8.floorCount
+                                        , keysDown = Set.empty
+                                        , assets = game.assets
+                                        , currentGoal =
+                                            let
+                                                ( holeX, holeY ) =
+                                                    fl1.hole
+                                            in
+                                            ( Frame3d.atPoint
+                                                (Point3d.meters holeX holeY 0)
+                                            , 0
+                                            )
+                                        , upcomingGoals =
+                                            List.indexedMap
+                                                (\index ( holeX, holeY ) ->
+                                                    Frame3d.atPoint
+                                                        (Point3d.meters
+                                                            holeX
+                                                            holeY
+                                                            (toFloat (index + 1) * floorSpacing)
+                                                        )
+                                                )
+                                                [ fl2.hole
+                                                , fl3.hole
+                                                , fl4.hole
+                                                , fl5.hole
+                                                , fl6.hole
+                                                , fl7.hole
+                                                , fl8.hole
+                                                ]
+                                        , previousGoals = []
+                                        }
+                              }
+                            , Cmd.none
+                            )
+
+                        Playing ->
+                            ( model, Cmd.none )
+
+                _ ->
+                    ( model, Cmd.none )
+
         Tick delta ->
             case model.game of
                 Loaded game ->
-                    let
-                        ( nextGame, nextModel ) =
-                            updateFloors delta
-                                (Timestep.advance simulateStep delta game)
-                                model
+                    case game.stage of
+                        MainMenu ->
+                            ( model, Cmd.none )
 
-                        sounds =
-                            nextGame.contacts
-                                |> Physics.contactPoints (\id1 id2 -> id1 == Ball || id2 == Ball)
-                                |> List.foldl
-                                    (\( _, _, contacts ) ->
-                                        (++)
-                                            (List.filterMap
-                                                (\{ impulse } ->
-                                                    if Quantity.unwrap impulse > 45 then
-                                                        Just (playSound { sound = "wood_hit" })
+                        Playing ->
+                            let
+                                ( nextGame, nextModel ) =
+                                    updateFloors delta
+                                        (Timestep.advance simulateStep delta game)
+                                        model
 
-                                                    else
-                                                        Nothing
-                                                )
-                                                contacts
+                                sounds =
+                                    nextGame.contacts
+                                        |> Physics.contactPoints (\id1 id2 -> id1 == Ball || id2 == Ball)
+                                        |> List.foldl
+                                            (\( _, _, contacts ) ->
+                                                (++)
+                                                    (List.filterMap
+                                                        (\{ impulse } ->
+                                                            if Quantity.unwrap impulse > 45 then
+                                                                Just (playSound { sound = "wood_hit" })
+
+                                                            else
+                                                                Nothing
+                                                        )
+                                                        contacts
+                                                    )
                                             )
-                                    )
-                                    []
-                    in
-                    ( nextModel
-                    , sounds
-                        |> Cmd.batch
-                    )
+                                            []
+                            in
+                            ( nextModel
+                            , sounds
+                                |> Cmd.batch
+                            )
 
                 _ ->
                     ( model, Cmd.none )
@@ -581,6 +611,58 @@ update msg model =
 
                 _ ->
                     ( model, Cmd.none )
+
+
+initPlayer : Physics.Body
+initPlayer =
+    Physics.sphere
+        playerSphere
+        (Physics.Material.dense
+            { density = Density.kilogramsPerCubicMeter 900
+            , friction = 0.9
+            , bounciness = 0.1
+            }
+        )
+        |> Physics.translateBy (Vector3d.meters 0 0 2)
+        |> Physics.damp
+            { linear = 0.01
+            , angular = 0.5
+            }
+
+
+initWalls : List ( Id, Physics.Body )
+initWalls =
+    [ ( Wall
+      , Physics.plane
+            (Plane3d.yz
+                |> Plane3d.flip
+                |> Plane3d.translateBy (Vector3d.meters maxExtent 0 0)
+            )
+            Physics.Material.wood
+      )
+    , ( Wall
+      , Physics.plane
+            (Plane3d.yz
+                |> Plane3d.translateBy (Vector3d.meters -maxExtent 0 0)
+            )
+            Physics.Material.wood
+      )
+    , ( Wall
+      , Physics.plane
+            (Plane3d.zx
+                |> Plane3d.flip
+                |> Plane3d.translateBy (Vector3d.meters 0 maxExtent 0)
+            )
+            Physics.Material.wood
+      )
+    , ( Wall
+      , Physics.plane
+            (Plane3d.zx
+                |> Plane3d.translateBy (Vector3d.meters 0 -maxExtent 0)
+            )
+            Physics.Material.wood
+      )
+    ]
 
 
 maxFloors : Int
@@ -857,20 +939,41 @@ view model =
                 [ Html.text err ]
 
             Loaded game ->
-                [ view3d model game
-                , game.player
-                    |> Physics.frame
-                    |> Frame3d.originPoint
-                    |> Point3d.zCoordinate
-                    |> Length.inMeters
-                    |> floor
-                    |> String.fromInt
-                    |> (\z ->
-                            Html.span [ Css.score ]
-                                [ Html.text ("Score: " ++ z) ]
-                       )
-                ]
+                viewGame model game
     }
+
+
+viewGame model game =
+    case game.stage of
+        MainMenu ->
+            viewMainMenu
+
+        Playing ->
+            [ view3d model game
+            , game.player
+                |> Physics.frame
+                |> Frame3d.originPoint
+                |> Point3d.zCoordinate
+                |> Length.inMeters
+                |> floor
+                |> String.fromInt
+                |> (\z ->
+                        Html.span [ Css.score ]
+                            [ Html.text ("Score: " ++ z) ]
+                   )
+            ]
+
+
+viewMainMenu : List (Html Msg)
+viewMainMenu =
+    [ Html.div
+        [ Css.mainMenu ]
+        [ Html.h1 [] [ Html.text "Ball Fall" ]
+        , Html.button
+            [ Html.Events.onClick UserClickedStart ]
+            [ Html.span [] [ Html.text "Drop-in" ] ]
+        ]
+    ]
 
 
 view3d : Model -> LoadedGame -> Html Msg

@@ -7,6 +7,41 @@ body {
     margin: 0;
 }
 
+button {
+    font-size: 1.5rem;
+    background-color: transparent;
+    color: white;
+    border: 0.25rem solid white;
+    padding: 0.5rem 3rem;
+    border-radius: 0.6rem;
+    cursor: pointer;
+}
+
+button:hover,
+button:focus,
+button:focus-within,
+button:focus-visible {
+    animation: buttonFocus 1s infinite;
+}
+
+@keyframes buttonFocus {
+    0% {
+        border-color: hsl(0deg, 100%, 50%);
+    }
+    25% {
+        border-color: hsl(90deg, 100%, 50%);
+    }
+    50% {
+        border-color: hsl(180deg, 100%, 50%);
+    }
+    75% {
+        border-color: hsl(270deg, 100%, 50%);
+    }
+    100% {
+        border-color: hsl(360deg, 100%, 50%);
+    }
+}
+
 .score {
     position: fixed;
     top: 0.5rem;
@@ -16,4 +51,18 @@ body {
     border-radius: 2rem;
     padding: 0.5rem 1rem;
     font-size: 2rem;
+}
+
+.mainMenu {
+    width: 100vw;
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    background-color: black;
+    color: white;
+
+    h1 {
+        font-size: 4rem;
+    }
 }
