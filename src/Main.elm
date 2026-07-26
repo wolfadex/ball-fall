@@ -1,4 +1,4 @@
-port module Main exposing (Flags, Game, Id, Model, Msg, main)
+port module Main exposing (Flags, Game, Id, Model, Msg, SavedSettings, main)
 
 import Angle
 import Block3d exposing (Block3d)
