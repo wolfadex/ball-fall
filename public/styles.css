@@ -116,6 +116,7 @@ input[type="checkbox"]:checked::before {
     font-size: 4rem;
     display: flex;
     flex-direction: column;
+    gap: 0.5rem;
     justify-content: center;
     align-items: center;
 }
@@ -128,6 +129,7 @@ input[type="checkbox"]:checked::before {
     align-items: center;
     background-color: black;
     color: white;
+    gap: 0.5rem;
 
     h1 {
         font-size: 4rem;
@@ -155,5 +157,35 @@ input[type="checkbox"]:checked::before {
         display: flex;
         align-items: center;
         gap: 0.5rem;
+    }
+}
+
+.bestScore {
+    font-size: 2rem;
+}
+
+.betterScore {
+    font-size: 2rem;
+
+    span {
+        animation: newBestScore 4s infinite;
+    }
+}
+
+@keyframes newBestScore {
+    0% {
+        color: hsl(0deg, 100%, 50%);
+    }
+    25% {
+        color: hsl(90deg, 100%, 50%);
+    }
+    50% {
+        color: hsl(180deg, 100%, 50%);
+    }
+    75% {
+        color: hsl(270deg, 100%, 50%);
+    }
+    100% {
+        color: hsl(360deg, 100%, 50%);
     }
 }

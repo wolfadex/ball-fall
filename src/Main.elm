@@ -55,6 +55,7 @@ type alias Flags =
     , width : Int
     , height : Int
     , savedSettings : SavedSettings
+    , bestScore : Json.Decode.Value
     }
 
 
@@ -82,6 +83,7 @@ type alias Model =
     , soundEffectsEnabled : Bool
     , musicVolume : Float
     , soundEffectsVolume : Float
+    , bestScore : Maybe Int
     }
 
 
@@ -134,7 +136,7 @@ type alias Assets =
 
 
 init : Flags -> ( Model, Cmd Msg )
-init { initialSeed, width, height, savedSettings } =
+init { initialSeed, width, height, savedSettings, bestScore } =
     ( { seed = Random.initialSeed initialSeed
       , width = width
       , height = height
@@ -144,6 +146,29 @@ init { initialSeed, width, height, savedSettings } =
       , soundEffectsEnabled = savedSettings.soundEffectsEnabled
       , musicVolume = savedSettings.musicVolume
       , soundEffectsVolume = savedSettings.soundEffectsVolume
+      , bestScore =
+            case
+                Json.Decode.decodeValue
+                    (Json.Decode.nullable
+                        (Json.Decode.andThen
+                            (\s ->
+                                case String.toInt s of
+                                    Nothing ->
+                                        Json.Decode.fail "Expected an int"
+
+                                    Just i ->
+                                        Json.Decode.succeed i
+                            )
+                            Json.Decode.string
+                        )
+                    )
+                    bestScore
+            of
+                Err _ ->
+                    Nothing
+
+                Ok best ->
+                    best
       }
     , Task.map4 (\a b c d -> ( ( a, b ), c, d ))
         (getMesh "ball")
@@ -404,6 +429,9 @@ port resumeMusic : String -> Cmd msg
 port saveSettings : SavedSettings -> Cmd msg
 
 
+port saveScore : Int -> Cmd msg
+
+
 type Msg
     = AssetsLoaded
         (Result
@@ -502,7 +530,31 @@ update msg model =
                                     )
 
                         Playing TimeRanOut ->
-                            initNewGame model game
+                            let
+                                currentScore =
+                                    game.player
+                                        |> Physics.frame
+                                        |> Frame3d.originPoint
+                                        |> Point3d.zCoordinate
+                                        |> Length.inMeters
+                                        |> floor
+                            in
+                            initNewGame
+                                { model
+                                    | bestScore =
+                                        Just <|
+                                            case model.bestScore of
+                                                Nothing ->
+                                                    currentScore
+
+                                                Just bestScore ->
+                                                    if currentScore < bestScore then
+                                                        currentScore
+
+                                                    else
+                                                        bestScore
+                                }
+                                game
 
                         Playing _ ->
                             ( model, Cmd.none )
@@ -525,7 +577,29 @@ update msg model =
 
                         Playing Falling ->
                             if Quantity.lessThanOrEqualToZero game.remainingTime then
-                                ( { model | game = Loaded { game | stage = Playing TimeRanOut } }, Cmd.none )
+                                let
+                                    currentScore =
+                                        game.player
+                                            |> Physics.frame
+                                            |> Frame3d.originPoint
+                                            |> Point3d.zCoordinate
+                                            |> Length.inMeters
+                                            |> floor
+                                in
+                                ( { model
+                                    | game = Loaded { game | stage = Playing TimeRanOut }
+                                  }
+                                , case model.bestScore of
+                                    Nothing ->
+                                        saveScore currentScore
+
+                                    Just bestScore ->
+                                        if currentScore < bestScore then
+                                            saveScore currentScore
+
+                                        else
+                                            Cmd.none
+                                )
 
                             else
                                 let
@@ -785,7 +859,7 @@ initNewGame model game =
 
 initTimer : Duration
 initTimer =
-    Duration.seconds 30
+    Duration.seconds 6
 
 
 initPlayer : Physics.Body
@@ -1129,18 +1203,18 @@ viewGame model game =
             viewMainMenu model
 
         Playing state ->
+            let
+                currentScore =
+                    game.player
+                        |> Physics.frame
+                        |> Frame3d.originPoint
+                        |> Point3d.zCoordinate
+                        |> Length.inMeters
+                        |> floor
+            in
             [ view3d model game
-            , game.player
-                |> Physics.frame
-                |> Frame3d.originPoint
-                |> Point3d.zCoordinate
-                |> Length.inMeters
-                |> floor
-                |> String.fromInt
-                |> (\z ->
-                        Html.span [ Css.score ]
-                            [ Html.text ("Score: " ++ z) ]
-                   )
+            , Html.span [ Css.score ]
+                [ Html.text ("Score: " ++ String.fromInt currentScore) ]
             , game.remainingTime
                 |> Duration.inSeconds
                 |> ceiling
@@ -1168,6 +1242,22 @@ viewGame model game =
                 TimeRanOut ->
                     Html.div [ Css.timeRanOut ]
                         [ Html.text "Time ran out"
+                        , case model.bestScore of
+                            Nothing ->
+                                Html.span [ Css.betterScore ]
+                                    [ Html.span [] [ Html.text "New best score: " ]
+                                    , Html.text (String.fromInt currentScore)
+                                    ]
+
+                            Just bestScore ->
+                                if currentScore < bestScore then
+                                    Html.span [ Css.betterScore ]
+                                        [ Html.span [] [ Html.text "New best score: " ]
+                                        , Html.text (String.fromInt currentScore)
+                                        ]
+
+                                else
+                                    Html.text ""
                         , Html.button
                             [ Html.Events.onClick UserClickedStart ]
                             [ Html.text "Drop-in again" ]
@@ -1186,6 +1276,14 @@ viewMainMenu model =
         , Html.button
             [ Html.Events.onClick UserClickedStart ]
             [ Html.span [] [ Html.text "Drop-in" ] ]
+        , Html.br [] []
+        , case model.bestScore of
+            Nothing ->
+                Html.text ""
+
+            Just bestScore ->
+                Html.span [ Css.bestScore ]
+                    [ Html.text ("Best score: " ++ String.fromInt bestScore) ]
         , Html.br [] []
         , Html.button
             [ Html.Events.onClick UserOpenedSettings ]

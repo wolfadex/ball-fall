@@ -37,7 +37,12 @@
                     width: Math.floor(window.innerWidth),
                     height: Math.floor(window.innerHeight),
                     savedSettings: savedSettings,
+                    bestScore: localStorage.getItem("score"),
                 },
+            });
+
+            app.ports.saveScore.subscribe(function (newBestScore) {
+                localStorage.setItem("score", JSON.stringify(newBestScore));
             });
 
             app.ports.saveSettings.subscribe(function (settings) {
