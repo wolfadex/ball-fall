@@ -54,6 +54,15 @@ type alias Flags =
     { initialSeed : Int
     , width : Int
     , height : Int
+    , savedSettings : SavedSettings
+    }
+
+
+type alias SavedSettings =
+    { musicEnabled : Bool
+    , soundEffectsEnabled : Bool
+    , musicVolume : Float
+    , soundEffectsVolume : Float
     }
 
 
@@ -68,6 +77,11 @@ type alias Model =
     , width : Int
     , height : Int
     , game : Game
+    , showSettings : Bool
+    , musicEnabled : Bool
+    , soundEffectsEnabled : Bool
+    , musicVolume : Float
+    , soundEffectsVolume : Float
     }
 
 
@@ -120,11 +134,16 @@ type alias Assets =
 
 
 init : Flags -> ( Model, Cmd Msg )
-init { initialSeed, width, height } =
+init { initialSeed, width, height, savedSettings } =
     ( { seed = Random.initialSeed initialSeed
       , width = width
       , height = height
       , game = Loading
+      , showSettings = False
+      , musicEnabled = savedSettings.musicEnabled
+      , soundEffectsEnabled = savedSettings.soundEffectsEnabled
+      , musicVolume = savedSettings.musicVolume
+      , soundEffectsVolume = savedSettings.soundEffectsVolume
       }
     , Task.map4 (\a b c d -> ( ( a, b ), c, d ))
         (getMesh "ball")
@@ -373,6 +392,18 @@ port playSound : { sound : String, volume : Float } -> Cmd msg
 port startMusic : { track : String, volume : Float } -> Cmd msg
 
 
+port musicVolumeSet : Float -> Cmd msg
+
+
+port stopMusic : String -> Cmd msg
+
+
+port resumeMusic : String -> Cmd msg
+
+
+port saveSettings : SavedSettings -> Cmd msg
+
+
 type Msg
     = AssetsLoaded
         (Result
@@ -388,6 +419,12 @@ type Msg
     | BrowserVisibilityChanged Browser.Events.Visibility
     | UserClickedStart
     | UserUnpaused
+    | UserOpenedSettings
+    | UserClosedSettings
+    | UserToggledMusicEnabled Bool
+    | UserToggledSoundEffectsEnabled Bool
+    | UserChangedMusicVolume String
+    | UserChangedSoundEffectsVolume String
     | Tick Duration
     | KeyDown String
     | KeyUp String
@@ -572,13 +609,63 @@ update msg model =
                 _ ->
                     ( model, Cmd.none )
 
+        UserOpenedSettings ->
+            ( { model | showSettings = True }, Cmd.none )
+
+        UserClosedSettings ->
+            ( { model | showSettings = False }
+            , saveSettings
+                { musicEnabled = model.musicEnabled
+                , soundEffectsEnabled = model.soundEffectsEnabled
+                , musicVolume = model.musicVolume
+                , soundEffectsVolume = model.soundEffectsVolume
+                }
+            )
+
+        UserToggledMusicEnabled enabled ->
+            ( { model | musicEnabled = enabled }
+            , if enabled then
+                resumeMusic "song_2"
+
+              else
+                stopMusic "song_2"
+            )
+
+        UserToggledSoundEffectsEnabled enabled ->
+            ( { model | soundEffectsEnabled = enabled }, Cmd.none )
+
+        UserChangedMusicVolume volumeStr ->
+            let
+                musicVolume =
+                    String.toFloat volumeStr
+                        |> Maybe.withDefault model.musicVolume
+            in
+            ( { model
+                | musicVolume = musicVolume
+              }
+            , musicVolumeSet musicVolume
+            )
+
+        UserChangedSoundEffectsVolume volumeStr ->
+            ( { model
+                | soundEffectsVolume =
+                    String.toFloat volumeStr
+                        |> Maybe.withDefault model.soundEffectsVolume
+              }
+            , Cmd.none
+            )
+
         KeyDown key ->
             case model.game of
                 Loaded game ->
                     if key == "Escape" then
                         case game.stage of
                             Playing Paused ->
-                                ( { model | game = Loaded { game | stage = Playing Falling } }, Cmd.none )
+                                if model.showSettings then
+                                    ( model, Cmd.none )
+
+                                else
+                                    ( { model | game = Loaded { game | stage = Playing Falling } }, Cmd.none )
 
                             Playing Falling ->
                                 ( { model | game = Loaded { game | stage = Playing Paused } }, Cmd.none )
@@ -1031,14 +1118,6 @@ view model =
                 [ Html.text err ]
 
             Loaded game ->
-                -- Html.audio
-                --     [ Html.Attributes.src "assets/audio/song_2.mp3"
-                --     , Html.Attributes.autoplay True
-                --     , Html.Attributes.loop True
-                --     -- , Html.Attributes.attribute "volume" "0.5"
-                --     ]
-                --     []
-                --     ::
                 viewGame model game
     }
 
@@ -1047,7 +1126,7 @@ viewGame : Model -> LoadedGame -> List (Html Msg)
 viewGame model game =
     case game.stage of
         MainMenu ->
-            viewMainMenu
+            viewMainMenu model
 
         Playing state ->
             [ view3d model game
@@ -1081,6 +1160,9 @@ viewGame model game =
                         , Html.button
                             [ Html.Events.onClick UserUnpaused ]
                             [ Html.text "Resume" ]
+                        , Html.button
+                            [ Html.Events.onClick UserOpenedSettings ]
+                            [ Html.text "Settings" ]
                         ]
 
                 TimeRanOut ->
@@ -1090,11 +1172,12 @@ viewGame model game =
                             [ Html.Events.onClick UserClickedStart ]
                             [ Html.text "Drop-in again" ]
                         ]
+            , viewSettings model
             ]
 
 
-viewMainMenu : List (Html Msg)
-viewMainMenu =
+viewMainMenu : Model -> List (Html Msg)
+viewMainMenu model =
     [ Html.div
         [ Css.mainMenu ]
         [ Html.h1 [] [ Html.text "Ball Fall" ]
@@ -1103,8 +1186,72 @@ viewMainMenu =
         , Html.button
             [ Html.Events.onClick UserClickedStart ]
             [ Html.span [] [ Html.text "Drop-in" ] ]
+        , Html.br [] []
+        , Html.button
+            [ Html.Events.onClick UserOpenedSettings ]
+            [ Html.text "Settings" ]
         ]
+    , viewSettings model
     ]
+
+
+viewSettings : Model -> Html Msg
+viewSettings model =
+    if model.showSettings then
+        Html.span
+            [ Css.settings ]
+            [ Html.text "SETTINGS"
+            , Html.label []
+                [ Html.input
+                    [ Html.Attributes.type_ "checkbox"
+                    , Html.Attributes.checked model.musicEnabled
+                    , Html.Events.onCheck UserToggledMusicEnabled
+                    ]
+                    []
+                , Html.span []
+                    [ Html.text "Music enabled" ]
+                ]
+            , Html.label []
+                [ Html.span [] [ Html.text "Music volume" ]
+                , Html.input
+                    [ Html.Attributes.type_ "range"
+                    , Html.Attributes.min "0"
+                    , Html.Attributes.max "1"
+                    , Html.Attributes.step "0.1"
+                    , Html.Attributes.value (String.fromFloat model.musicVolume)
+                    , Html.Events.onInput UserChangedMusicVolume
+                    ]
+                    []
+                ]
+            , Html.label []
+                [ Html.input
+                    [ Html.Attributes.type_ "checkbox"
+                    , Html.Attributes.checked model.soundEffectsEnabled
+                    , Html.Events.onCheck UserToggledSoundEffectsEnabled
+                    ]
+                    []
+                , Html.span []
+                    [ Html.text "SFX enabled" ]
+                ]
+            , Html.label []
+                [ Html.span [] [ Html.text "SFX volume" ]
+                , Html.input
+                    [ Html.Attributes.type_ "range"
+                    , Html.Attributes.min "0"
+                    , Html.Attributes.max "1"
+                    , Html.Attributes.step "0.1"
+                    , Html.Attributes.value (String.fromFloat model.soundEffectsVolume)
+                    , Html.Events.onInput UserChangedSoundEffectsVolume
+                    ]
+                    []
+                ]
+            , Html.button
+                [ Html.Events.onClick UserClosedSettings ]
+                [ Html.text "Back" ]
+            ]
+
+    else
+        Html.text ""
 
 
 view3d : Model -> LoadedGame -> Html Msg

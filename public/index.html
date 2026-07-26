@@ -22,33 +22,73 @@
                 tracks[track].load();
             }
             const playingTracks = {};
+            let savedSettings = JSON.parse(
+                localStorage.getItem("settings"),
+            ) || {
+                musicEnabled: true,
+                soundEffectsEnabled: true,
+                musicVolume: 1.0,
+                soundEffectsVolume: 1.0,
+            };
 
             const app = Elm.Main.init({
                 flags: {
                     initialSeed: Date.now(),
                     width: Math.floor(window.innerWidth),
                     height: Math.floor(window.innerHeight),
+                    savedSettings: savedSettings,
                 },
             });
 
+            app.ports.saveSettings.subscribe(function (settings) {
+                if (!settings.musicEnabled && savedSettings.musicEnabled) {
+                    for (const track of Object.values(playingTracks)) {
+                        track.audio.pause();
+                    }
+                }
+
+                savedSettings = settings;
+                localStorage.setItem("settings", JSON.stringify(settings));
+            });
+
             app.ports.playSound.subscribe(function ({ sound, volume }) {
-                const localNode = sounds[sound].cloneNode(true);
-                localNode.volume = volume;
-                localNode.play();
+                if (savedSettings.soundEffectsEnabled) {
+                    const localNode = sounds[sound].cloneNode(true);
+                    localNode.volume =
+                        volume * savedSettings.soundEffectsVolume;
+                    localNode.play();
+                }
             });
             app.ports.startMusic.subscribe(function ({ track, volume }) {
-                if (!playingTracks[track]) {
-                    playingTracks[track] = tracks[track].cloneNode(true);
-                    playingTracks[track].loop = true;
+                if (savedSettings.musicEnabled) {
+                    if (!playingTracks[track]) {
+                        playingTracks[track] = {
+                            audio: tracks[track].cloneNode(true),
+                            baseVolume: volume,
+                        };
+                        playingTracks[track].audio.loop = true;
+                    }
+                    playingTracks[track].baseVolume = volume;
+                    playingTracks[track].audio.volume =
+                        volume * savedSettings.musicVolume;
+                    playingTracks[track].audio.play();
                 }
-                playingTracks[track].volume = volume;
-                playingTracks[track].play();
             });
-            // app.ports.stoptMusic.subscribe(function ({ track, volume }) {
-            //     if (playingTracks[track]) {
-            //         playingTracks[track].stop();
-            //     }
-            // });
+            app.ports.musicVolumeSet.subscribe(function (volume) {
+                for (const track of Object.values(playingTracks)) {
+                    track.audio.volume = track.baseVolume * volume;
+                }
+            });
+            app.ports.stopMusic.subscribe(function (track) {
+                if (playingTracks[track]) {
+                    playingTracks[track].audio.pause();
+                }
+            });
+            app.ports.resumeMusic.subscribe(function (track) {
+                if (playingTracks[track]) {
+                    playingTracks[track].audio.play();
+                }
+            });
         </script>
     </body>
 </html>
