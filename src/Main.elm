@@ -859,7 +859,7 @@ initNewGame model game =
 
 initTimer : Duration
 initTimer =
-    Duration.seconds 6
+    Duration.seconds 30
 
 
 initPlayer : Physics.Body
