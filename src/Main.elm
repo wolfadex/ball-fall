@@ -93,6 +93,11 @@ type Game
     | Loaded LoadedGame
 
 
+type BallSelection
+    = OriginalBall
+    | SplitBall
+
+
 type alias LoadedGame =
     { player : Physics.Body
     , bodies : List ( Id, Physics.Body )
@@ -107,6 +112,7 @@ type alias LoadedGame =
     , previousGoals : List ( GoalFrame, Float, Duration )
     , remainingTime : Duration
     , stage : Stage
+    , ballSelection : BallSelection
     }
 
 
@@ -126,12 +132,18 @@ type alias GoalFrame =
 
 
 type alias Assets =
-    { ballMesh : Scene3d.Mesh.Textured Physics.BodyCoordinates
-    , ballShadow : Scene3d.Mesh.Shadow Physics.BodyCoordinates
-    , ballMaterial : Scene3d.Material.Textured Physics.BodyCoordinates
+    { ballOriginal : BallAssets
+    , ballSplitMiddle : BallAssets
     , holeMesh : Scene3d.Mesh.Textured Physics.BodyCoordinates
     , holeShadow : Scene3d.Mesh.Shadow Physics.BodyCoordinates
     , goalRingMesh : Scene3d.Mesh.Textured Physics.BodyCoordinates
+    }
+
+
+type alias BallAssets =
+    { mesh : Scene3d.Mesh.Textured Physics.BodyCoordinates
+    , shadow : Scene3d.Mesh.Shadow Physics.BodyCoordinates
+    , material : Scene3d.Material.Textured Physics.BodyCoordinates
     }
 
 
@@ -171,14 +183,31 @@ init { initialSeed, width, height, savedSettings, bestScore } =
                     best
       }
     , Task.map4 (\a b c d -> ( ( a, b ), c, d ))
-        (getMesh "ball")
-        (Scene3d.Material.load "assets/ball.png"
-            |> Task.mapError (\_ -> "Failed to load texture")
-        )
+        (getBall "ball")
+        (getBall "ball_split_middle")
+        -- (getMesh "ball")
+        -- (Scene3d.Material.load "assets/ball.png"
+        --     |> Task.mapError (\_ -> "Failed to load texture")
+        -- )
         (getMesh "hole")
         (getMesh "goal_ring")
         |> Task.attempt AssetsLoaded
     )
+
+
+getBall : String -> Task String BallAssets
+getBall name =
+    Task.map2
+        (\mesh texture ->
+            { mesh = mesh
+            , shadow = Scene3d.Mesh.shadow mesh
+            , material = Scene3d.Material.texturedMatte texture
+            }
+        )
+        (getMesh name)
+        (Scene3d.Material.load ("assets/" ++ name ++ ".png")
+            |> Task.mapError (\_ -> "Failed to load texture")
+        )
 
 
 getMesh : String -> Task String (Scene3d.Mesh.Textured coordinates)
@@ -436,9 +465,7 @@ type Msg
     = AssetsLoaded
         (Result
             String
-            ( ( Scene3d.Mesh.Textured Physics.BodyCoordinates
-              , Scene3d.Material.Texture Color
-              )
+            ( ( BallAssets, BallAssets )
             , Scene3d.Mesh.Textured Physics.BodyCoordinates
             , Scene3d.Mesh.Textured Physics.BodyCoordinates
             )
@@ -453,6 +480,9 @@ type Msg
     | UserToggledSoundEffectsEnabled Bool
     | UserChangedMusicVolume String
     | UserChangedSoundEffectsVolume String
+    | UserSelectedPreviousBall
+    | UserSelectedNextBall
+      --
     | Tick Duration
     | KeyDown String
     | KeyUp String
@@ -472,14 +502,13 @@ update msg model =
                 _ ->
                     ( model, Cmd.none )
 
-        AssetsLoaded (Ok ( ( ballMesh, ballTexture ), holeMesh, goalRingMesh )) ->
+        AssetsLoaded (Ok ( ( ballOriginal, ballSplitMiddle ), holeMesh, goalRingMesh )) ->
             case model.game of
                 Loading ->
                     let
                         assets =
-                            { ballMesh = ballMesh
-                            , ballShadow = Scene3d.Mesh.shadow ballMesh
-                            , ballMaterial = Scene3d.Material.texturedMatte ballTexture
+                            { ballOriginal = ballOriginal
+                            , ballSplitMiddle = ballSplitMiddle
                             , holeMesh = holeMesh
                             , holeShadow = Scene3d.Mesh.shadow holeMesh
                             , goalRingMesh = goalRingMesh
@@ -504,6 +533,7 @@ update msg model =
                                 , upcomingGoals = []
                                 , previousGoals = []
                                 , remainingTime = initTimer
+                                , ballSelection = SplitBall
                                 }
                       }
                     , Cmd.none
@@ -729,6 +759,50 @@ update msg model =
             , Cmd.none
             )
 
+        UserSelectedPreviousBall ->
+            case model.game of
+                Loaded game ->
+                    ( { model
+                        | game =
+                            Loaded
+                                { game
+                                    | ballSelection =
+                                        case game.ballSelection of
+                                            OriginalBall ->
+                                                SplitBall
+
+                                            SplitBall ->
+                                                SplitBall
+                                }
+                      }
+                    , Cmd.none
+                    )
+
+                _ ->
+                    ( model, Cmd.none )
+
+        UserSelectedNextBall ->
+            case model.game of
+                Loaded game ->
+                    ( { model
+                        | game =
+                            Loaded
+                                { game
+                                    | ballSelection =
+                                        case game.ballSelection of
+                                            OriginalBall ->
+                                                OriginalBall
+
+                                            SplitBall ->
+                                                OriginalBall
+                                }
+                      }
+                    , Cmd.none
+                    )
+
+                _ ->
+                    ( model, Cmd.none )
+
         KeyDown key ->
             case model.game of
                 Loaded game ->
@@ -848,6 +922,7 @@ initNewGame model game =
                         ]
                 , previousGoals = []
                 , remainingTime = initTimer
+                , ballSelection = game.ballSelection
                 }
       }
     , playSound
@@ -1219,7 +1294,7 @@ viewGame : Model -> LoadedGame -> List (Html Msg)
 viewGame model game =
     case game.stage of
         MainMenu ->
-            viewMainMenu model
+            viewMainMenu model game
 
         Playing state ->
             let
@@ -1285,8 +1360,8 @@ viewGame model game =
             ]
 
 
-viewMainMenu : Model -> List (Html Msg)
-viewMainMenu model =
+viewMainMenu : Model -> LoadedGame -> List (Html Msg)
+viewMainMenu model game =
     [ Html.div
         [ Css.mainMenu ]
         [ Html.h1 [] [ Html.text "Ball Fall" ]
@@ -1295,6 +1370,7 @@ viewMainMenu model =
         , Html.button
             [ Html.Events.onClick UserClickedStart ]
             [ Html.span [] [ Html.text "Drop-in" ] ]
+        , viewBallSelection model game
         , Html.br [] []
         , case model.bestScore of
             Nothing ->
@@ -1310,6 +1386,81 @@ viewMainMenu model =
         ]
     , viewSettings model
     ]
+
+
+viewBallSelection : Model -> LoadedGame -> Html Msg
+viewBallSelection model game =
+    Html.div [ Css.ballSelection ]
+        [ Html.button
+            [ Html.Events.onClick UserSelectedPreviousBall
+            ]
+            [ Html.text "◀" ]
+        , Scene3d.custom
+            { lights =
+                Scene3d.twoLights
+                    (Scene3d.Light.point (Scene3d.Light.castsShadows True)
+                        { chromaticity = Scene3d.Light.sunlight
+                        , intensity = LuminousFlux.lumens 5000
+                        , position = Point3d.meters 2 3 3
+                        }
+                    )
+                    (goalLight ( Frame3d.atPoint (Point3d.meters 0 0 -4), 0 ))
+            , exposure = Scene3d.exposureValue 4
+            , toneMapping = Scene3d.hableFilmicToneMapping
+            , whiteBalance = Scene3d.Light.daylight
+            , antialiasing = Scene3d.noAntialiasing
+            , dimensions = ( Pixels.int 80, Pixels.int 80 )
+            , camera =
+                Camera3d.lookAt
+                    { eyePoint = Point3d.meters 2 3 3
+                    , focalPoint = Point3d.unsafe { x = 0, y = 0, z = 0 }
+                    , upDirection = Direction3d.z
+                    , projection = Camera3d.Perspective
+                    , fov = Camera3d.angle (Angle.degrees 30)
+                    }
+            , clipDepth = Length.millimeters 2
+            , background = Scene3d.backgroundColor Color.black
+            , entities =
+                let
+                    ballAssets =
+                        case game.ballSelection of
+                            OriginalBall ->
+                                game.assets.ballOriginal
+
+                            SplitBall ->
+                                game.assets.ballSplitMiddle
+                in
+                [ Scene3d.meshWithShadow
+                    ballAssets.material
+                    ballAssets.mesh
+                    ballAssets.shadow
+                    |> Scene3d.scaleAbout Point3d.origin 1.25
+                    |> Scene3d.placeIn Frame3d.atOrigin
+                ]
+
+            -- [ Scene3d.meshWithShadow
+            --     game.assets.ballMaterial
+            --     game.assets.ballMesh
+            --     game.assets.ballShadow
+            --     |> Scene3d.scaleAbout Point3d.origin 0.25
+            --     |> Scene3d.placeIn (Physics.frame game.player)
+            -- , wallPosX
+            -- , wallNegX playerZ
+            -- , wallPosY
+            -- , wallNegY playerZ
+            -- , Scene3d.mesh
+            --     (Scene3d.Material.matte holeColor)
+            --     game.assets.goalRingMesh
+            --     |> Scene3d.scaleAbout Point3d.origin 0.9
+            --     |> Scene3d.placeIn holeFrame
+            -- ]
+            --     ++ List.map (viewGoal game.assets) game.previousGoals
+            }
+        , Html.button
+            [ Html.Events.onClick UserSelectedNextBall
+            ]
+            [ Html.text "▶" ]
+        ]
 
 
 viewSettings : Model -> Html Msg
@@ -1448,10 +1599,19 @@ view3d model game =
         , clipDepth = Length.millimeters 2
         , background = Scene3d.backgroundColor Color.black
         , entities =
+            let
+                ballAssets =
+                    case game.ballSelection of
+                        OriginalBall ->
+                            game.assets.ballOriginal
+
+                        SplitBall ->
+                            game.assets.ballSplitMiddle
+            in
             [ Scene3d.meshWithShadow
-                game.assets.ballMaterial
-                game.assets.ballMesh
-                game.assets.ballShadow
+                ballAssets.material
+                ballAssets.mesh
+                ballAssets.shadow
                 |> Scene3d.scaleAbout Point3d.origin 0.25
                 |> Scene3d.placeIn (Physics.frame game.player)
             , wallPosX

@@ -136,6 +136,18 @@ input[type="checkbox"]:checked::before {
     }
 }
 
+.ballSelection {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+
+    button {
+        border: none;
+        line-height: 1.5rem;
+        padding: 0.25rem 1rem;
+    }
+}
+
 .settings {
     position: fixed;
     top: 10rem;
