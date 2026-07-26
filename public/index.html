@@ -11,11 +11,17 @@
     <body>
         <script src="elm.js"></script>
         <script>
-            const audio = {};
+            const sounds = {};
             for (const sound of ["goal_made", "ball_hit", "menu_select"]) {
-                audio[sound] = new Audio(`assets/audio/${sound}.mp3`);
-                audio[sound].load();
+                sounds[sound] = new Audio(`assets/audio/${sound}.mp3`);
+                sounds[sound].load();
             }
+            const tracks = {};
+            for (const track of ["song_1", "song_2"]) {
+                tracks[track] = new Audio(`assets/audio/${track}.mp3`);
+                tracks[track].load();
+            }
+            const playingTracks = {};
 
             const app = Elm.Main.init({
                 flags: {
@@ -26,10 +32,23 @@
             });
 
             app.ports.playSound.subscribe(function ({ sound, volume }) {
-                const localNode = audio[sound].cloneNode(true);
+                const localNode = sounds[sound].cloneNode(true);
                 localNode.volume = volume;
                 localNode.play();
             });
+            app.ports.startMusic.subscribe(function ({ track, volume }) {
+                if (!playingTracks[track]) {
+                    playingTracks[track] = tracks[track].cloneNode(true);
+                    playingTracks[track].loop = true;
+                }
+                playingTracks[track].volume = volume;
+                playingTracks[track].play();
+            });
+            // app.ports.stoptMusic.subscribe(function ({ track, volume }) {
+            //     if (playingTracks[track]) {
+            //         playingTracks[track].stop();
+            //     }
+            // });
         </script>
     </body>
 </html>

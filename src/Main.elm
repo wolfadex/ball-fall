@@ -12,6 +12,7 @@ import Direction3d
 import Duration exposing (Duration)
 import Frame3d exposing (Frame3d)
 import Html exposing (Html)
+import Html.Attributes
 import Html.Events
 import Http
 import Json.Decode
@@ -369,6 +370,9 @@ subscriptions _ =
 port playSound : { sound : String, volume : Float } -> Cmd msg
 
 
+port startMusic : { track : String, volume : Float } -> Cmd msg
+
+
 type Msg
     = AssetsLoaded
         (Result
@@ -449,6 +453,16 @@ update msg model =
                     case game.stage of
                         MainMenu ->
                             initNewGame model game
+                                |> Tuple.mapSecond
+                                    (\cmd ->
+                                        Cmd.batch
+                                            [ cmd
+                                            , startMusic
+                                                { track = "song_2"
+                                                , volume = 0.5
+                                                }
+                                            ]
+                                    )
 
                         Playing TimeRanOut ->
                             initNewGame model game
@@ -1017,6 +1031,14 @@ view model =
                 [ Html.text err ]
 
             Loaded game ->
+                -- Html.audio
+                --     [ Html.Attributes.src "assets/audio/song_2.mp3"
+                --     , Html.Attributes.autoplay True
+                --     , Html.Attributes.loop True
+                --     -- , Html.Attributes.attribute "volume" "0.5"
+                --     ]
+                --     []
+                --     ::
                 viewGame model game
     }
 
