@@ -1186,10 +1186,29 @@ view model =
     , body =
         case model.game of
             Loading ->
-                [ Html.text "Loading..." ]
+                [ Html.div [ Css.loading ]
+                    [ Html.text "Loading..."
+                    , Html.div
+                        [ Css.loader ]
+                        []
+                    ]
+                ]
 
             Failure err ->
-                [ Html.text err ]
+                [ Html.div [ Css.failure ]
+                    [ Html.text err
+                    , Html.br [] []
+                    , Html.span []
+                        [ Html.text "Please report errors to "
+                        , Html.a
+                            [ Html.Attributes.href "https://github.com/wolfadex/ball-fall"
+                            , Html.Attributes.target "_blank"
+                            , Html.Attributes.rel "noopener noreferrer"
+                            ]
+                            [ Html.text "https://github.com/wolfadex/ball-fall" ]
+                        ]
+                    ]
+                ]
 
             Loaded game ->
                 viewGame model game
