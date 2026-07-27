@@ -97,6 +97,7 @@ type BallSelection
     = OriginalBall
     | SplitBall
     | PokeBall
+    | BananaBall
 
 
 type alias LoadedGame =
@@ -136,6 +137,7 @@ type alias Assets =
     { ballOriginal : BallAssets
     , ballSplitMiddle : BallAssets
     , ballPoke : BallAssets
+    , ballBanana : ( BallAssets, BallAssets )
 
     --
     , holeMesh : Scene3d.Mesh.Textured Physics.BodyCoordinates
@@ -186,18 +188,35 @@ init { initialSeed, width, height, savedSettings, bestScore } =
                 Ok best ->
                     best
       }
-    , Task.map5 (\a b c d e -> ( ( a, b, c ), d, e ))
-        (getBall "ball")
-        (getBall "ball_split_middle")
-        (getBall "ball_poke")
-        -- (getMesh "ball")
-        -- (Scene3d.Material.load "assets/ball.png"
-        --     |> Task.mapError (\_ -> "Failed to load texture")
-        -- )
+    , Task.map3 (\a b c -> ( a, b, c ))
+        getBalls
         (getMesh "hole")
         (getMesh "goal_ring")
         |> Task.attempt AssetsLoaded
     )
+
+
+getBalls :
+    Task
+        String
+        { ballOriginal : BallAssets
+        , ballSplitMiddle : BallAssets
+        , ballPoke : BallAssets
+        , ballBanana : ( BallAssets, BallAssets )
+        }
+getBalls =
+    Task.map4
+        (\ballOriginal ballSplitMiddle ballPoke ballBanana ->
+            { ballOriginal = ballOriginal
+            , ballSplitMiddle = ballSplitMiddle
+            , ballPoke = ballPoke
+            , ballBanana = ballBanana
+            }
+        )
+        (getBall "ball")
+        (getBall "ball_split_middle")
+        (getBall "ball_poke")
+        getBallBanana
 
 
 getBall : String -> Task String BallAssets
@@ -211,6 +230,30 @@ getBall name =
         )
         (getMesh name)
         (Scene3d.Material.load ("assets/" ++ name ++ ".png")
+            |> Task.mapError (\_ -> "Failed to load texture")
+        )
+
+
+getBallBanana : Task String ( BallAssets, BallAssets )
+getBallBanana =
+    Task.map4
+        (\meshOuter textureOuter meshInner textureInner ->
+            ( { mesh = meshOuter
+              , shadow = Scene3d.Mesh.shadow meshOuter
+              , material = Scene3d.Material.texturedMatte textureOuter
+              }
+            , { mesh = meshInner
+              , shadow = Scene3d.Mesh.shadow meshInner
+              , material = Scene3d.Material.texturedMatte textureInner
+              }
+            )
+        )
+        (getMesh "ball_banana_outer")
+        (Scene3d.Material.load "assets/ball_banana_outer.png"
+            |> Task.mapError (\_ -> "Failed to load texture")
+        )
+        (getMesh "ball_banana_inner")
+        (Scene3d.Material.load "assets/ball_banana_inner.png"
             |> Task.mapError (\_ -> "Failed to load texture")
         )
 
@@ -470,7 +513,11 @@ type Msg
     = AssetsLoaded
         (Result
             String
-            ( ( BallAssets, BallAssets, BallAssets )
+            ( { ballOriginal : BallAssets
+              , ballSplitMiddle : BallAssets
+              , ballPoke : BallAssets
+              , ballBanana : ( BallAssets, BallAssets )
+              }
             , Scene3d.Mesh.Textured Physics.BodyCoordinates
             , Scene3d.Mesh.Textured Physics.BodyCoordinates
             )
@@ -507,13 +554,14 @@ update msg model =
                 _ ->
                     ( model, Cmd.none )
 
-        AssetsLoaded (Ok ( ( ballOriginal, ballSplitMiddle, ballPoke ), holeMesh, goalRingMesh )) ->
+        AssetsLoaded (Ok ( { ballOriginal, ballSplitMiddle, ballPoke, ballBanana }, holeMesh, goalRingMesh )) ->
             case model.game of
                 Loading ->
                     let
                         assets =
                             { ballOriginal = ballOriginal
                             , ballSplitMiddle = ballSplitMiddle
+                            , ballBanana = ballBanana
                             , ballPoke = ballPoke
                             , holeMesh = holeMesh
                             , holeShadow = Scene3d.Mesh.shadow holeMesh
@@ -780,6 +828,9 @@ update msg model =
                                             PokeBall ->
                                                 SplitBall
 
+                                            BananaBall ->
+                                                PokeBall
+
                                             OriginalBall ->
                                                 PokeBall
                                 }
@@ -803,6 +854,9 @@ update msg model =
                                                 PokeBall
 
                                             PokeBall ->
+                                                OriginalBall
+
+                                            BananaBall ->
                                                 OriginalBall
 
                                             OriginalBall ->
@@ -1433,49 +1487,54 @@ viewBallSelection model game =
             , clipDepth = Length.millimeters 2
             , background = Scene3d.backgroundColor Color.black
             , entities =
-                let
-                    ballAssets =
-                        case game.ballSelection of
-                            OriginalBall ->
-                                game.assets.ballOriginal
-
-                            SplitBall ->
-                                game.assets.ballSplitMiddle
-
-                            PokeBall ->
-                                game.assets.ballPoke
-                in
-                [ Scene3d.meshWithShadow
-                    ballAssets.material
-                    ballAssets.mesh
-                    ballAssets.shadow
+                [ viewBall game.assets game.ballSelection
                     |> Scene3d.scaleAbout Point3d.origin 1.25
                     |> Scene3d.placeIn Frame3d.atOrigin
                 ]
-
-            -- [ Scene3d.meshWithShadow
-            --     game.assets.ballMaterial
-            --     game.assets.ballMesh
-            --     game.assets.ballShadow
-            --     |> Scene3d.scaleAbout Point3d.origin 0.25
-            --     |> Scene3d.placeIn (Physics.frame game.player)
-            -- , wallPosX
-            -- , wallNegX playerZ
-            -- , wallPosY
-            -- , wallNegY playerZ
-            -- , Scene3d.mesh
-            --     (Scene3d.Material.matte holeColor)
-            --     game.assets.goalRingMesh
-            --     |> Scene3d.scaleAbout Point3d.origin 0.9
-            --     |> Scene3d.placeIn holeFrame
-            -- ]
-            --     ++ List.map (viewGoal game.assets) game.previousGoals
             }
         , Html.button
             [ Html.Events.onClick UserSelectedNextBall
             ]
             [ Html.text "▶" ]
         ]
+
+
+viewBall : Assets -> BallSelection -> Scene3d.Entity Physics.BodyCoordinates
+viewBall assets selection =
+    case selection of
+        OriginalBall ->
+            Scene3d.meshWithShadow
+                assets.ballOriginal.material
+                assets.ballOriginal.mesh
+                assets.ballOriginal.shadow
+
+        SplitBall ->
+            Scene3d.meshWithShadow
+                assets.ballSplitMiddle.material
+                assets.ballSplitMiddle.mesh
+                assets.ballSplitMiddle.shadow
+
+        PokeBall ->
+            Scene3d.meshWithShadow
+                assets.ballPoke.material
+                assets.ballPoke.mesh
+                assets.ballPoke.shadow
+
+        BananaBall ->
+            let
+                ( outer, inner ) =
+                    assets.ballBanana
+            in
+            Scene3d.group
+                [ Scene3d.meshWithShadow
+                    outer.material
+                    outer.mesh
+                    outer.shadow
+                , Scene3d.meshWithShadow
+                    inner.material
+                    inner.mesh
+                    inner.shadow
+                ]
 
 
 viewSettings : Model -> Html Msg
@@ -1614,22 +1673,7 @@ view3d model game =
         , clipDepth = Length.millimeters 2
         , background = Scene3d.backgroundColor Color.black
         , entities =
-            let
-                ballAssets =
-                    case game.ballSelection of
-                        OriginalBall ->
-                            game.assets.ballOriginal
-
-                        SplitBall ->
-                            game.assets.ballSplitMiddle
-
-                        PokeBall ->
-                            game.assets.ballPoke
-            in
-            [ Scene3d.meshWithShadow
-                ballAssets.material
-                ballAssets.mesh
-                ballAssets.shadow
+            [ viewBall game.assets game.ballSelection
                 |> Scene3d.scaleAbout Point3d.origin 0.25
                 |> Scene3d.placeIn (Physics.frame game.player)
             , wallPosX
