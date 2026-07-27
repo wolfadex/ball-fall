@@ -96,6 +96,7 @@ type Game
 type BallSelection
     = OriginalBall
     | SplitBall
+    | PokeBall
 
 
 type alias LoadedGame =
@@ -134,6 +135,9 @@ type alias GoalFrame =
 type alias Assets =
     { ballOriginal : BallAssets
     , ballSplitMiddle : BallAssets
+    , ballPoke : BallAssets
+
+    --
     , holeMesh : Scene3d.Mesh.Textured Physics.BodyCoordinates
     , holeShadow : Scene3d.Mesh.Shadow Physics.BodyCoordinates
     , goalRingMesh : Scene3d.Mesh.Textured Physics.BodyCoordinates
@@ -182,9 +186,10 @@ init { initialSeed, width, height, savedSettings, bestScore } =
                 Ok best ->
                     best
       }
-    , Task.map4 (\a b c d -> ( ( a, b ), c, d ))
+    , Task.map5 (\a b c d e -> ( ( a, b, c ), d, e ))
         (getBall "ball")
         (getBall "ball_split_middle")
+        (getBall "ball_poke")
         -- (getMesh "ball")
         -- (Scene3d.Material.load "assets/ball.png"
         --     |> Task.mapError (\_ -> "Failed to load texture")
@@ -465,7 +470,7 @@ type Msg
     = AssetsLoaded
         (Result
             String
-            ( ( BallAssets, BallAssets )
+            ( ( BallAssets, BallAssets, BallAssets )
             , Scene3d.Mesh.Textured Physics.BodyCoordinates
             , Scene3d.Mesh.Textured Physics.BodyCoordinates
             )
@@ -502,13 +507,14 @@ update msg model =
                 _ ->
                     ( model, Cmd.none )
 
-        AssetsLoaded (Ok ( ( ballOriginal, ballSplitMiddle ), holeMesh, goalRingMesh )) ->
+        AssetsLoaded (Ok ( ( ballOriginal, ballSplitMiddle, ballPoke ), holeMesh, goalRingMesh )) ->
             case model.game of
                 Loading ->
                     let
                         assets =
                             { ballOriginal = ballOriginal
                             , ballSplitMiddle = ballSplitMiddle
+                            , ballPoke = ballPoke
                             , holeMesh = holeMesh
                             , holeShadow = Scene3d.Mesh.shadow holeMesh
                             , goalRingMesh = goalRingMesh
@@ -768,11 +774,14 @@ update msg model =
                                 { game
                                     | ballSelection =
                                         case game.ballSelection of
-                                            OriginalBall ->
+                                            SplitBall ->
+                                                OriginalBall
+
+                                            PokeBall ->
                                                 SplitBall
 
-                                            SplitBall ->
-                                                SplitBall
+                                            OriginalBall ->
+                                                PokeBall
                                 }
                       }
                     , Cmd.none
@@ -790,11 +799,14 @@ update msg model =
                                 { game
                                     | ballSelection =
                                         case game.ballSelection of
-                                            OriginalBall ->
+                                            SplitBall ->
+                                                PokeBall
+
+                                            PokeBall ->
                                                 OriginalBall
 
-                                            SplitBall ->
-                                                OriginalBall
+                                            OriginalBall ->
+                                                SplitBall
                                 }
                       }
                     , Cmd.none
@@ -1429,6 +1441,9 @@ viewBallSelection model game =
 
                             SplitBall ->
                                 game.assets.ballSplitMiddle
+
+                            PokeBall ->
+                                game.assets.ballPoke
                 in
                 [ Scene3d.meshWithShadow
                     ballAssets.material
@@ -1607,6 +1622,9 @@ view3d model game =
 
                         SplitBall ->
                             game.assets.ballSplitMiddle
+
+                        PokeBall ->
+                            game.assets.ballPoke
             in
             [ Scene3d.meshWithShadow
                 ballAssets.material
