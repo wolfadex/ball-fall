@@ -78,6 +78,8 @@ type Id
 
 type alias Model =
     { seed : Random.Seed
+    , rawSeed : String
+    , userSetSeed : Bool
     , width : Int
     , height : Int
     , game : Game
@@ -172,6 +174,8 @@ type alias BallAssets =
 init : Flags -> ( Model, Cmd Msg )
 init { initialSeed, width, height, savedSettings, bestScore, tiltSupported } =
     ( { seed = Random.initialSeed initialSeed
+      , rawSeed = String.fromInt initialSeed
+      , userSetSeed = False
       , width = width
       , height = height
       , game = Loading
@@ -535,6 +539,9 @@ port saveSettings : SavedSettings -> Cmd msg
 port saveScore : Int -> Cmd msg
 
 
+port copySeed : String -> Cmd msg
+
+
 type Msg
     = AssetsLoaded
         (Result
@@ -551,18 +558,23 @@ type Msg
     | BrowserResized Int Int
     | BrowserVisibilityChanged Browser.Events.Visibility
     | UserClickedStart
+    | UserSelectedPreviousBall
+    | UserSelectedNextBall
+      --
     | UserPaused
     | UserUnpaused
+      --
     | UserOpenedSettings
     | UserClosedSettings
     | UserResetTiltAngle
+    | UserChangedRawSeed String
     | UserToggledMusicEnabled Bool
     | UserChangedMusicVolume String
     | UserToggledSoundEffectsEnabled Bool
     | UserChangedSoundEffectsVolume String
     | UserToggledTiltControlsEnabled Bool
-    | UserSelectedPreviousBall
-    | UserSelectedNextBall
+    | UserCopiedSeed
+      --
       --
     | Tick Duration
     | KeyDown String
@@ -819,15 +831,23 @@ update msg model =
             ( { model | showSettings = True }, Cmd.none )
 
         UserClosedSettings ->
-            ( { model | showSettings = False }
-            , saveSettings
-                { musicEnabled = model.musicEnabled
-                , soundEffectsEnabled = model.soundEffectsEnabled
-                , musicVolume = model.musicVolume
-                , soundEffectsVolume = model.soundEffectsVolume
-                , tiltControlsEnabled = model.tiltControlsEnabled
-                }
-            )
+            case String.toInt model.rawSeed of
+                Nothing ->
+                    ( model, Cmd.none )
+
+                Just seed ->
+                    ( { model
+                        | showSettings = False
+                        , seed = Random.initialSeed seed
+                      }
+                    , saveSettings
+                        { musicEnabled = model.musicEnabled
+                        , soundEffectsEnabled = model.soundEffectsEnabled
+                        , musicVolume = model.musicVolume
+                        , soundEffectsVolume = model.soundEffectsVolume
+                        , tiltControlsEnabled = model.tiltControlsEnabled
+                        }
+                    )
 
         UserResetTiltAngle ->
             ( { model | deviceOrientationZero = model.deviceOrientation }, Cmd.none )
@@ -866,6 +886,19 @@ update msg model =
                         |> Maybe.withDefault model.soundEffectsVolume
               }
             , Cmd.none
+            )
+
+        UserChangedRawSeed rawSeed ->
+            ( { model
+                | rawSeed = rawSeed
+                , userSetSeed = True
+              }
+            , Cmd.none
+            )
+
+        UserCopiedSeed ->
+            ( model
+            , copySeed model.rawSeed
             )
 
         UserSelectedPreviousBall ->
@@ -1010,9 +1043,29 @@ initNewGame model game =
 
         fl8 =
             nextFloor fl7.floorCount fl7.seed
+
+        ( nextSeed, _ ) =
+            Random.step
+                (Random.int Random.minInt Random.maxInt)
+                model.seed
+
+        ( seed, rawSeed ) =
+            if model.userSetSeed then
+                case String.toInt model.rawSeed of
+                    Nothing ->
+                        ( Random.initialSeed nextSeed, String.fromInt nextSeed )
+
+                    Just userSeed ->
+                        ( Random.initialSeed userSeed, model.rawSeed )
+
+            else
+                ( Random.initialSeed nextSeed, String.fromInt nextSeed )
     in
     ( { model
         | deviceOrientationZero = model.deviceOrientation
+        , seed = seed
+        , rawSeed = rawSeed
+        , userSetSeed = False
         , game =
             Loaded
                 { stage = Playing Falling
@@ -1527,11 +1580,18 @@ viewGame model game =
                         Html.span [ Css.timer ]
                             [ Html.text (z ++ "s") ]
                    )
-            , Html.button
-                [ Css.pauseButton
-                , Html.Events.onClick UserPaused
-                ]
-                [ Html.text "⏸" ]
+            , case state of
+                Falling ->
+                    Html.button
+                        [ Css.iconButton
+                        , Css.pauseButton
+                        , Html.Attributes.title "Pause"
+                        , Html.Events.onClick UserPaused
+                        ]
+                        [ Html.text "⏸" ]
+
+                _ ->
+                    Html.text ""
             , case state of
                 Falling ->
                     Html.text ""
@@ -1570,6 +1630,9 @@ viewGame model game =
                         , Html.button
                             [ Html.Events.onClick UserClickedStart ]
                             [ Html.text "Drop-in again" ]
+                        , Html.button
+                            [ Html.Events.onClick UserOpenedSettings ]
+                            [ Html.text "Settings" ]
                         ]
             , viewSettings model
             ]
@@ -1767,6 +1830,48 @@ viewSettings model =
             , Html.button
                 [ Html.Events.onClick UserResetTiltAngle ]
                 [ Html.text "Reset tilt angle" ]
+            , Html.label []
+                [ Html.span [] [ Html.text "Seed" ]
+                , Html.input
+                    [ Html.Attributes.type_ "text"
+                    , Html.Attributes.value model.rawSeed
+                    , Html.Events.onInput UserChangedRawSeed
+                    , Html.Attributes.readonly <|
+                        case model.game of
+                            Loaded game ->
+                                case game.stage of
+                                    MainMenu ->
+                                        False
+
+                                    Playing Falling ->
+                                        True
+
+                                    Playing Paused ->
+                                        True
+
+                                    Playing TimeRanOut ->
+                                        False
+
+                            _ ->
+                                False
+                    ]
+                    []
+                , Html.button
+                    [ Css.iconButton
+                    , Html.Attributes.title "Copy seed to clipboard"
+                    , Html.Events.onClick UserCopiedSeed
+                    ]
+                    [ Html.text "⎘" ]
+                ]
+            , Html.span [ Css.error ]
+                [ Html.text <|
+                    case String.toInt model.rawSeed of
+                        Nothing ->
+                            "Seed must be a whole number"
+
+                        Just _ ->
+                            ""
+                ]
             , Html.button
                 [ Html.Events.onClick UserClosedSettings ]
                 [ Html.text "Back" ]

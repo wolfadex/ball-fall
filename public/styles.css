@@ -43,6 +43,17 @@ button:focus-visible {
     }
 }
 
+.iconButton {
+    color: white;
+    background-color: rgba(0, 0, 0, 0.25);
+    border-radius: 2rem;
+    border: none;
+    padding: 0.5rem 1rem;
+    font-size: 2rem;
+    line-height: 1.5rem;
+    font-family: monospace;
+}
+
 input[type="checkbox"] {
     appearance: none;
     position: relative;
@@ -63,6 +74,24 @@ input[type="checkbox"]::before {
 
 input[type="checkbox"]:checked::before {
     visibility: visible;
+}
+
+input[type="text"] {
+    appearance: none;
+    font-size: 1.2rem;
+    background-color: transparent;
+    color: white;
+    border: 2px solid white;
+    height: 2rem;
+}
+
+input[type="text"][readonly] {
+    border: none;
+}
+
+.error {
+    color: red;
+    font-size: 1.2rem;
 }
 
 .score {
@@ -92,14 +121,6 @@ input[type="checkbox"]:checked::before {
     position: fixed;
     right: 0.5rem;
     bottom: 0.5rem;
-    color: white;
-    background-color: rgba(0, 0, 0, 0.25);
-    border-radius: 2rem;
-    border: none;
-    padding: 0.5rem 1rem;
-    font-size: 2rem;
-    line-height: 1.5rem;
-    font-family: monospace;
 }
 
 .paused {
@@ -166,7 +187,7 @@ input[type="checkbox"]:checked::before {
 
 .settings {
     position: fixed;
-    top: 10rem;
+    top: 1rem;
     left: 50%;
     transform: translateX(-50%);
     color: white;

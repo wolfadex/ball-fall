@@ -101,6 +101,17 @@
                 }
             });
 
+            app.ports.copySeed.subscribe(function (seed) {
+                navigator.clipboard.writeText(seed).then(
+                    () => {
+                        console.log("copied");
+                    },
+                    (err) => {
+                        console.log("err", err);
+                    },
+                );
+            });
+
             window.addEventListener(
                 "deviceorientation",
                 (event) => {
