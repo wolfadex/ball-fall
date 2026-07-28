@@ -832,7 +832,7 @@ update msg model =
                                                 PokeBall
 
                                             OriginalBall ->
-                                                PokeBall
+                                                BananaBall
                                 }
                       }
                     , Cmd.none
@@ -854,7 +854,7 @@ update msg model =
                                                 PokeBall
 
                                             PokeBall ->
-                                                OriginalBall
+                                                BananaBall
 
                                             BananaBall ->
                                                 OriginalBall
@@ -1527,13 +1527,19 @@ viewBall assets selection =
             in
             Scene3d.group
                 [ Scene3d.meshWithShadow
-                    outer.material
-                    outer.mesh
-                    outer.shadow
-                , Scene3d.meshWithShadow
                     inner.material
                     inner.mesh
                     inner.shadow
+
+                -- , Scene3d.meshWithShadow
+                --     outer.material
+                --     outer.mesh
+                --     outer.shadow
+                , Scene3d.sphereWithShadow
+                    (Scene3d.Material.matte (Color.rgba 1 1 1 0.5))
+                    (Sphere3d.atOrigin
+                        (Length.meters 1)
+                    )
                 ]
 
 
