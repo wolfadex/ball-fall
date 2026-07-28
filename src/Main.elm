@@ -8,7 +8,7 @@ import Camera3d
 import Color exposing (Color)
 import Css
 import Density
-import Direction3d
+import Direction3d exposing (Direction3d)
 import Duration exposing (Duration)
 import Frame3d exposing (Frame3d)
 import Html exposing (Html)
@@ -37,7 +37,7 @@ import Sphere3d exposing (Sphere3d)
 import Task exposing (Task)
 import Timestep exposing (Timestep)
 import Torque
-import Vector3d
+import Vector3d exposing (Vector3d)
 
 
 main : Program Flags Model Msg
@@ -56,14 +56,16 @@ type alias Flags =
     , height : Int
     , savedSettings : SavedSettings
     , bestScore : Json.Decode.Value
+    , tiltSupported : Bool
     }
 
 
 type alias SavedSettings =
     { musicEnabled : Bool
-    , soundEffectsEnabled : Bool
     , musicVolume : Float
+    , soundEffectsEnabled : Bool
     , soundEffectsVolume : Float
+    , tiltControlsEnabled : Bool
     }
 
 
@@ -78,12 +80,24 @@ type alias Model =
     , width : Int
     , height : Int
     , game : Game
+    , bestScore : Maybe Int
+    , deviceOrientationZero : DeviceOrientation
+    , deviceOrientation : DeviceOrientation
+    , tiltSupported : Bool
+
+    -- Settings
     , showSettings : Bool
     , musicEnabled : Bool
-    , soundEffectsEnabled : Bool
     , musicVolume : Float
+    , soundEffectsEnabled : Bool
     , soundEffectsVolume : Float
-    , bestScore : Maybe Int
+    , tiltControlsEnabled : Bool
+    }
+
+
+type alias DeviceOrientation =
+    { leftRight : Float
+    , upDown : Float
     }
 
 
@@ -154,16 +168,14 @@ type alias BallAssets =
 
 
 init : Flags -> ( Model, Cmd Msg )
-init { initialSeed, width, height, savedSettings, bestScore } =
+init { initialSeed, width, height, savedSettings, bestScore, tiltSupported } =
     ( { seed = Random.initialSeed initialSeed
       , width = width
       , height = height
       , game = Loading
-      , showSettings = False
-      , musicEnabled = savedSettings.musicEnabled
-      , soundEffectsEnabled = savedSettings.soundEffectsEnabled
-      , musicVolume = savedSettings.musicVolume
-      , soundEffectsVolume = savedSettings.soundEffectsVolume
+      , deviceOrientationZero = { leftRight = 0, upDown = 0 }
+      , deviceOrientation = { leftRight = 0, upDown = 0 }
+      , tiltSupported = tiltSupported
       , bestScore =
             case
                 Json.Decode.decodeValue
@@ -187,6 +199,14 @@ init { initialSeed, width, height, savedSettings, bestScore } =
 
                 Ok best ->
                     best
+
+      -- Settings
+      , showSettings = False
+      , musicEnabled = savedSettings.musicEnabled
+      , soundEffectsEnabled = savedSettings.soundEffectsEnabled
+      , musicVolume = savedSettings.musicVolume
+      , soundEffectsVolume = savedSettings.soundEffectsVolume
+      , tiltControlsEnabled = savedSettings.tiltControlsEnabled
       }
     , Task.map3 (\a b c -> ( a, b, c ))
         getBalls
@@ -485,7 +505,11 @@ subscriptions _ =
             )
         , Browser.Events.onResize BrowserResized
         , Browser.Events.onVisibilityChange BrowserVisibilityChanged
+        , deviceOrientationEvent DeviceOrientationChanged
         ]
+
+
+port deviceOrientationEvent : (Json.Decode.Value -> msg) -> Sub msg
 
 
 port playSound : { sound : String, volume : Float } -> Cmd msg
@@ -525,19 +549,23 @@ type Msg
     | BrowserResized Int Int
     | BrowserVisibilityChanged Browser.Events.Visibility
     | UserClickedStart
+    | UserPaused
     | UserUnpaused
     | UserOpenedSettings
     | UserClosedSettings
+    | UserResetTiltAngle
     | UserToggledMusicEnabled Bool
-    | UserToggledSoundEffectsEnabled Bool
     | UserChangedMusicVolume String
+    | UserToggledSoundEffectsEnabled Bool
     | UserChangedSoundEffectsVolume String
+    | UserToggledTiltControlsEnabled Bool
     | UserSelectedPreviousBall
     | UserSelectedNextBall
       --
     | Tick Duration
     | KeyDown String
     | KeyUp String
+    | DeviceOrientationChanged Json.Decode.Value
 
 
 update : Msg -> Model -> ( Model, Cmd Msg )
@@ -689,7 +717,7 @@ update msg model =
                                 let
                                     ( nextGame, nextModel, goalMade ) =
                                         updateFloors delta
-                                            (Timestep.advance simulateStep delta game)
+                                            (Timestep.advance (simulateStep model.tiltControlsEnabled model.deviceOrientationZero model.deviceOrientation) delta game)
                                             model
 
                                     ballHits =
@@ -749,6 +777,24 @@ update msg model =
                 _ ->
                     ( model, Cmd.none )
 
+        UserPaused ->
+            case model.game of
+                Loaded game ->
+                    case game.stage of
+                        Playing Falling ->
+                            ( { model | game = Loaded { game | stage = Playing Paused } }
+                            , playSound
+                                { sound = "menu_select"
+                                , volume = 0.15
+                                }
+                            )
+
+                        _ ->
+                            ( model, Cmd.none )
+
+                _ ->
+                    ( model, Cmd.none )
+
         UserUnpaused ->
             case model.game of
                 Loaded game ->
@@ -777,8 +823,12 @@ update msg model =
                 , soundEffectsEnabled = model.soundEffectsEnabled
                 , musicVolume = model.musicVolume
                 , soundEffectsVolume = model.soundEffectsVolume
+                , tiltControlsEnabled = model.tiltControlsEnabled
                 }
             )
+
+        UserResetTiltAngle ->
+            ( { model | deviceOrientationZero = model.deviceOrientation }, Cmd.none )
 
         UserToggledMusicEnabled enabled ->
             ( { model | musicEnabled = enabled }
@@ -791,6 +841,9 @@ update msg model =
 
         UserToggledSoundEffectsEnabled enabled ->
             ( { model | soundEffectsEnabled = enabled }, Cmd.none )
+
+        UserToggledTiltControlsEnabled enabled ->
+            ( { model | tiltControlsEnabled = enabled }, Cmd.none )
 
         UserChangedMusicVolume volumeStr ->
             let
@@ -869,6 +922,27 @@ update msg model =
                 _ ->
                     ( model, Cmd.none )
 
+        DeviceOrientationChanged orientation ->
+            case
+                Json.Decode.decodeValue
+                    (Json.Decode.map3
+                        (\pitch _ roll ->
+                            { leftRight = roll
+                            , upDown = pitch
+                            }
+                        )
+                        (Json.Decode.field "pitch" Json.Decode.float)
+                        (Json.Decode.field "yaw" Json.Decode.float)
+                        (Json.Decode.field "roll" Json.Decode.float)
+                    )
+                    orientation
+            of
+                Err _ ->
+                    ( model, Cmd.none )
+
+                Ok deviceOrientation ->
+                    ( { model | deviceOrientation = deviceOrientation }, Cmd.none )
+
         KeyDown key ->
             case model.game of
                 Loaded game ->
@@ -930,7 +1004,8 @@ initNewGame model game =
             nextFloor fl7.floorCount fl7.seed
     in
     ( { model
-        | game =
+        | deviceOrientationZero = model.deviceOrientation
+        , game =
             Loaded
                 { stage = Playing Falling
                 , player = initPlayer
@@ -1204,8 +1279,8 @@ animateGoals delta ( hole, hue, life ) =
         Nothing
 
 
-simulateStep : LoadedGame -> LoadedGame
-simulateStep game =
+simulateStep : Bool -> DeviceOrientation -> DeviceOrientation -> LoadedGame -> LoadedGame
+simulateStep tiltControlsEnabled deviceOrientationZero deviceOrientation game =
     let
         ( newBodies, newContacts ) =
             Physics.simulate
@@ -1213,7 +1288,7 @@ simulateStep game =
                     | contacts = game.contacts
                     , duration = Timestep.duration game.timestep
                 }
-                (( Ball, updatePlayerBall game.keysDown game.player )
+                (( Ball, updatePlayerBall tiltControlsEnabled deviceOrientationZero deviceOrientation game.keysDown game.player )
                     :: game.bodies
                 )
 
@@ -1246,22 +1321,9 @@ extractPlayerHelper defaultPlayer searched toSearch =
                 extractPlayerHelper defaultPlayer (next :: searched) rest
 
 
-updatePlayerBall : Set String -> Physics.Body -> Physics.Body
-updatePlayerBall keysDown body =
-    let
-        applyForward =
-            Set.member "ArrowUp" keysDown || Set.member "w" keysDown
-
-        applyBackward =
-            Set.member "ArrowDown" keysDown || Set.member "s" keysDown
-
-        applyLeft =
-            Set.member "ArrowLeft" keysDown || Set.member "a" keysDown
-
-        applyRight =
-            Set.member "ArrowRight" keysDown || Set.member "d" keysDown
-    in
-    if applyForward || applyBackward || applyLeft || applyRight then
+updatePlayerBall : Bool -> DeviceOrientation -> DeviceOrientation -> Set String -> Physics.Body -> Physics.Body
+updatePlayerBall tiltControlsEnabled deviceOrientationZero deviceOrientation keysDown body =
+    if tiltControlsEnabled && (deviceOrientation.upDown /= deviceOrientationZero.upDown || deviceOrientation.leftRight /= deviceOrientationZero.leftRight) then
         let
             cameraFrame =
                 Physics.frame body
@@ -1269,45 +1331,49 @@ updatePlayerBall keysDown body =
                     |> makeCamera
                     |> Camera3d.frame
 
-            verticalParts =
-                if applyForward && applyBackward then
-                    { x = 0, y = 0, z = 0 }
-
-                else if applyForward then
-                    cameraFrame
+            -- use ranges of 20 (up) to 40 (down)
+            ( verticalParts, verticalMagintude ) =
+                if deviceOrientation.upDown < deviceOrientationZero.upDown then
+                    ( cameraFrame
                         |> Frame3d.xDirection
                         |> Direction3d.unwrap
                         |> (\p -> { x = -p.x, y = -p.y, z = 0 })
+                    , max 20 (abs (deviceOrientationZero.upDown - deviceOrientation.upDown)) / 20
+                    )
 
-                else if applyBackward then
-                    cameraFrame
+                else if deviceOrientation.upDown > deviceOrientationZero.upDown then
+                    ( cameraFrame
                         |> Frame3d.xDirection
                         |> Direction3d.unwrap
+                    , max 20 (abs (deviceOrientation.upDown - deviceOrientationZero.upDown)) / 20
+                    )
 
                 else
-                    { x = 0, y = 0, z = 0 }
+                    ( { x = 0, y = 0, z = 0 }, 0 )
 
-            horizontalParts =
-                if applyLeft && applyRight then
-                    { x = 0, y = 0, z = 0 }
-
-                else if applyLeft then
-                    cameraFrame
+            -- use ranges of -30 (left) to 30 (right)
+            ( horizontalParts, horizontalMagnitude ) =
+                if deviceOrientation.leftRight < deviceOrientationZero.leftRight then
+                    ( cameraFrame
                         |> Frame3d.yDirection
                         |> Direction3d.unwrap
                         |> (\p -> { x = -p.x, y = -p.y, z = 0 })
+                    , max 30 (abs (deviceOrientationZero.leftRight - deviceOrientation.leftRight)) / 30
+                    )
 
-                else if applyRight then
-                    cameraFrame
+                else if deviceOrientation.leftRight > deviceOrientationZero.leftRight then
+                    ( cameraFrame
                         |> Frame3d.yDirection
                         |> Direction3d.unwrap
+                    , max 30 (abs (deviceOrientation.leftRight - deviceOrientationZero.leftRight)) / 30
+                    )
 
                 else
-                    { x = 0, y = 0, z = 0 }
+                    ( { x = 0, y = 0, z = 0 }, 0 )
         in
         Physics.applyTorque
             (Vector3d.withLength
-                (Torque.newtonMeters 150)
+                (Torque.newtonMeters (75 * min 1 (verticalMagintude + horizontalMagnitude)))
                 (Direction3d.unsafe
                     { x = verticalParts.x + horizontalParts.x
                     , y = verticalParts.y + horizontalParts.y
@@ -1318,7 +1384,77 @@ updatePlayerBall keysDown body =
             body
 
     else
-        body
+        let
+            applyForward =
+                Set.member "ArrowUp" keysDown || Set.member "w" keysDown
+
+            applyBackward =
+                Set.member "ArrowDown" keysDown || Set.member "s" keysDown
+
+            applyLeft =
+                Set.member "ArrowLeft" keysDown || Set.member "a" keysDown
+
+            applyRight =
+                Set.member "ArrowRight" keysDown || Set.member "d" keysDown
+        in
+        if applyForward || applyBackward || applyLeft || applyRight then
+            let
+                cameraFrame =
+                    Physics.frame body
+                        |> Frame3d.originPoint
+                        |> makeCamera
+                        |> Camera3d.frame
+
+                verticalParts =
+                    if applyForward && applyBackward then
+                        { x = 0, y = 0, z = 0 }
+
+                    else if applyForward then
+                        cameraFrame
+                            |> Frame3d.xDirection
+                            |> Direction3d.unwrap
+                            |> (\p -> { x = -p.x, y = -p.y, z = 0 })
+
+                    else if applyBackward then
+                        cameraFrame
+                            |> Frame3d.xDirection
+                            |> Direction3d.unwrap
+
+                    else
+                        { x = 0, y = 0, z = 0 }
+
+                horizontalParts =
+                    if applyLeft && applyRight then
+                        { x = 0, y = 0, z = 0 }
+
+                    else if applyLeft then
+                        cameraFrame
+                            |> Frame3d.yDirection
+                            |> Direction3d.unwrap
+                            |> (\p -> { x = -p.x, y = -p.y, z = 0 })
+
+                    else if applyRight then
+                        cameraFrame
+                            |> Frame3d.yDirection
+                            |> Direction3d.unwrap
+
+                    else
+                        { x = 0, y = 0, z = 0 }
+            in
+            Physics.applyTorque
+                (Vector3d.withLength
+                    (Torque.newtonMeters 150)
+                    (Direction3d.unsafe
+                        { x = verticalParts.x + horizontalParts.x
+                        , y = verticalParts.y + horizontalParts.y
+                        , z = 0
+                        }
+                    )
+                )
+                body
+
+        else
+            body
 
 
 view : Model -> Browser.Document Msg
@@ -1383,6 +1519,11 @@ viewGame model game =
                         Html.span [ Css.timer ]
                             [ Html.text (z ++ "s") ]
                    )
+            , Html.button
+                [ Css.pauseButton
+                , Html.Events.onClick UserPaused
+                ]
+                [ Html.text "⏸" ]
             , case state of
                 Falling ->
                     Html.text ""
@@ -1593,6 +1734,20 @@ viewSettings model =
                     ]
                     []
                 ]
+            , Html.label []
+                [ Html.input
+                    [ Html.Attributes.type_ "checkbox"
+                    , Html.Attributes.checked model.tiltControlsEnabled
+                    , Html.Events.onCheck UserToggledTiltControlsEnabled
+                    , Html.Attributes.disabled (not model.tiltSupported)
+                    ]
+                    []
+                , Html.span []
+                    [ Html.text "Tilt controls enabled" ]
+                ]
+            , Html.button
+                [ Html.Events.onClick UserResetTiltAngle ]
+                [ Html.text "Reset tilt angle" ]
             , Html.button
                 [ Html.Events.onClick UserClosedSettings ]
                 [ Html.text "Back" ]

@@ -22,13 +22,18 @@
                 tracks[track].load();
             }
             const playingTracks = {};
-            let savedSettings = JSON.parse(
-                localStorage.getItem("settings"),
-            ) || {
+
+            const defaultSettings = {
                 musicEnabled: true,
                 soundEffectsEnabled: true,
                 musicVolume: 1.0,
                 soundEffectsVolume: 1.0,
+                tiltControlsEnabled: true,
+            };
+            let savedSettings = {
+                ...defaultSettings,
+                ...(JSON.parse(localStorage.getItem("settings")) ||
+                    defaultSettings),
             };
 
             const app = Elm.Main.init({
@@ -38,6 +43,7 @@
                     height: Math.floor(window.innerHeight),
                     savedSettings: savedSettings,
                     bestScore: localStorage.getItem("score"),
+                    tiltSupported: window.DeviceOrientationEvent != null,
                 },
             });
 
@@ -94,6 +100,22 @@
                     playingTracks[track].audio.play();
                 }
             });
+
+            window.addEventListener(
+                "deviceorientation",
+                (event) => {
+                    const rotateDegrees = event.alpha; // alpha: rotation around z-axis
+                    const leftToRight = event.gamma; // gamma: left to right
+                    const frontToBack = event.beta; // beta: front back motion
+
+                    app.ports.deviceOrientationEvent.send({
+                        pitch: event.beta,
+                        yaw: event.alpha,
+                        roll: event.gamma,
+                    });
+                },
+                true,
+            );
         </script>
     </body>
 </html>
