@@ -18,6 +18,7 @@ import Http
 import Json.Decode
 import Length
 import LineSegment3d
+import Luminance
 import LuminousFlux
 import Obj.Decode
 import Physics exposing (onEarth)
@@ -108,10 +109,11 @@ type Game
 
 
 type BallSelection
-    = OriginalBall
-    | SplitBall
-    | PokeBall
-    | BananaBall
+    = Ball_Original
+    | Ball_Split
+    | Ball_Poke
+    | Ball_Banana
+    | Ball_Pinball
 
 
 type alias LoadedGame =
@@ -615,7 +617,7 @@ update msg model =
                                 , upcomingGoals = []
                                 , previousGoals = []
                                 , remainingTime = initTimer
-                                , ballSelection = SplitBall
+                                , ballSelection = Ball_Split
                                 }
                       }
                     , Cmd.none
@@ -875,17 +877,20 @@ update msg model =
                                 { game
                                     | ballSelection =
                                         case game.ballSelection of
-                                            SplitBall ->
-                                                OriginalBall
+                                            Ball_Split ->
+                                                Ball_Pinball
 
-                                            PokeBall ->
-                                                SplitBall
+                                            Ball_Poke ->
+                                                Ball_Split
 
-                                            BananaBall ->
-                                                PokeBall
+                                            Ball_Banana ->
+                                                Ball_Poke
 
-                                            OriginalBall ->
-                                                BananaBall
+                                            Ball_Original ->
+                                                Ball_Banana
+
+                                            Ball_Pinball ->
+                                                Ball_Original
                                 }
                       }
                     , Cmd.none
@@ -903,17 +908,20 @@ update msg model =
                                 { game
                                     | ballSelection =
                                         case game.ballSelection of
-                                            SplitBall ->
-                                                PokeBall
+                                            Ball_Split ->
+                                                Ball_Poke
 
-                                            PokeBall ->
-                                                BananaBall
+                                            Ball_Poke ->
+                                                Ball_Banana
 
-                                            BananaBall ->
-                                                OriginalBall
+                                            Ball_Banana ->
+                                                Ball_Original
 
-                                            OriginalBall ->
-                                                SplitBall
+                                            Ball_Original ->
+                                                Ball_Pinball
+
+                                            Ball_Pinball ->
+                                                Ball_Split
                                 }
                       }
                     , Cmd.none
@@ -1643,25 +1651,25 @@ viewBallSelection model game =
 viewBall : Assets -> BallSelection -> Scene3d.Entity Physics.BodyCoordinates
 viewBall assets selection =
     case selection of
-        OriginalBall ->
+        Ball_Original ->
             Scene3d.meshWithShadow
                 assets.ballOriginal.material
                 assets.ballOriginal.mesh
                 assets.ballOriginal.shadow
 
-        SplitBall ->
+        Ball_Split ->
             Scene3d.meshWithShadow
                 assets.ballSplitMiddle.material
                 assets.ballSplitMiddle.mesh
                 assets.ballSplitMiddle.shadow
 
-        PokeBall ->
+        Ball_Poke ->
             Scene3d.meshWithShadow
                 assets.ballPoke.material
                 assets.ballPoke.mesh
                 assets.ballPoke.shadow
 
-        BananaBall ->
+        Ball_Banana ->
             let
                 ( outer, inner ) =
                     assets.ballBanana
@@ -1682,6 +1690,17 @@ viewBall assets selection =
                         (Length.meters 1)
                     )
                 ]
+
+        Ball_Pinball ->
+            Scene3d.sphereWithShadow
+                (Scene3d.Material.metal
+                    { baseColor = Color.rgb 1 1 1
+                    , roughness = 0.4
+                    }
+                )
+                (Sphere3d.atOrigin
+                    (Length.meters 1)
+                )
 
 
 viewSettings : Model -> Html Msg
