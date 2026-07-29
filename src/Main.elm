@@ -1,14 +1,14 @@
-port module Main exposing (Flags, Game, Id, Model, Msg, SavedSettings, main)
+port module Main exposing (DeviceOrientation, Flags, Game, Id, Model, Msg, SavedSettings, main)
 
 import Angle
 import Block3d exposing (Block3d)
 import Browser
 import Browser.Events
 import Camera3d
-import Color exposing (Color)
+import Color
 import Css
 import Density
-import Direction3d exposing (Direction3d)
+import Direction3d
 import Duration exposing (Duration)
 import Frame3d exposing (Frame3d)
 import Html exposing (Html)
@@ -18,7 +18,6 @@ import Http
 import Json.Decode
 import Length
 import LineSegment3d
-import Luminance
 import LuminousFlux
 import Obj.Decode
 import Physics exposing (onEarth)
@@ -38,7 +37,7 @@ import Sphere3d exposing (Sphere3d)
 import Task exposing (Task)
 import Timestep exposing (Timestep)
 import Torque
-import Vector3d exposing (Vector3d)
+import Vector3d
 
 
 main : Program Flags Model Msg
@@ -1648,7 +1647,7 @@ viewMainMenu model game =
         , Html.button
             [ Html.Events.onClick UserClickedStart ]
             [ Html.span [] [ Html.text "Drop-in" ] ]
-        , viewBallSelection model game
+        , viewBallSelection game
         , Html.br [] []
         , case model.bestScore of
             Nothing ->
@@ -1666,8 +1665,8 @@ viewMainMenu model game =
     ]
 
 
-viewBallSelection : Model -> LoadedGame -> Html Msg
-viewBallSelection model game =
+viewBallSelection : LoadedGame -> Html Msg
+viewBallSelection game =
     Html.div [ Css.ballSelection ]
         [ Html.button
             [ Html.Events.onClick UserSelectedPreviousBall
@@ -1734,7 +1733,7 @@ viewBall assets selection =
 
         Ball_Banana ->
             let
-                ( outer, inner ) =
+                ( _, inner ) =
                     assets.ballBanana
             in
             Scene3d.group
