@@ -1,4 +1,4 @@
-port module Main exposing (DeviceOrientation, Flags, Game, Id, Model, Msg, SavedSettings, main)
+port module Main exposing (DeviceOrientation, Flags, Game, Id, Model, Msg, Settings, main)
 
 import Angle
 import Block3d exposing (Block3d)
@@ -16,6 +16,7 @@ import Html.Attributes
 import Html.Events
 import Http
 import Json.Decode
+import Json.Encode
 import Length
 import LineSegment3d
 import LuminousFlux
@@ -54,19 +55,108 @@ type alias Flags =
     { initialSeed : Int
     , width : Int
     , height : Int
-    , savedSettings : SavedSettings
+    , savedSettings : Json.Decode.Value
     , bestScore : Json.Decode.Value
     , tiltSupported : Bool
     }
 
 
-type alias SavedSettings =
+type alias Settings =
     { musicEnabled : Bool
     , musicVolume : Float
     , soundEffectsEnabled : Bool
     , soundEffectsVolume : Float
     , tiltControlsEnabled : Bool
+    , ballsUnlocked : List BallSelection
     }
+
+
+defaultSettings : Settings
+defaultSettings =
+    { musicEnabled = True
+    , musicVolume = 1.0
+    , soundEffectsEnabled = True
+    , soundEffectsVolume = 1.0
+    , tiltControlsEnabled = True
+    , ballsUnlocked = [ Ball_Split, Ball_Original ]
+    }
+
+
+encodeSettings : Model -> Json.Decode.Value
+encodeSettings model =
+    Json.Encode.object
+        [ ( "musicEnabled", Json.Encode.bool model.musicEnabled )
+        , ( "musicVolume", Json.Encode.float model.musicVolume )
+        , ( "soundEffectsEnabled", Json.Encode.bool model.soundEffectsEnabled )
+        , ( "soundEffectsVolume", Json.Encode.float model.soundEffectsVolume )
+        , ( "tiltControlsEnabled", Json.Encode.bool model.tiltControlsEnabled )
+        , ( "ballsUnlocked", Json.Encode.list encodeBall model.ballsUnlocked )
+        ]
+
+
+decodeSettings : Json.Decode.Decoder Settings
+decodeSettings =
+    Json.Decode.map6
+        (\musicEnabled musicVolume soundEffectsEnabled soundEffectsVolume tiltControlsEnabled ballsUnlocked ->
+            { musicEnabled = musicEnabled
+            , musicVolume = musicVolume
+            , soundEffectsEnabled = soundEffectsEnabled
+            , soundEffectsVolume = soundEffectsVolume
+            , tiltControlsEnabled = tiltControlsEnabled
+            , ballsUnlocked = ballsUnlocked
+            }
+        )
+        (decodeOptional defaultSettings.musicEnabled
+            "musicEnabled"
+            Json.Decode.bool
+        )
+        (decodeOptional defaultSettings.musicVolume
+            "musicVolume"
+            Json.Decode.float
+        )
+        (decodeOptional defaultSettings.soundEffectsEnabled
+            "soundEffectsEnabled"
+            Json.Decode.bool
+        )
+        (decodeOptional defaultSettings.soundEffectsVolume
+            "soundEffectsVolume"
+            Json.Decode.float
+        )
+        (decodeOptional defaultSettings.tiltControlsEnabled
+            "tiltControlsEnabled"
+            Json.Decode.bool
+        )
+        (decodeOptional defaultSettings.ballsUnlocked
+            "ballsUnlocked"
+            (Json.Decode.list decodeBall)
+        )
+
+
+decodeOptional : a -> String -> Json.Decode.Decoder a -> Json.Decode.Decoder a
+decodeOptional fallback key valDecoder =
+    let
+        nullOr decoder =
+            Json.Decode.oneOf [ decoder, Json.Decode.null fallback ]
+
+        handleResult input =
+            case Json.Decode.decodeValue (Json.Decode.field key Json.Decode.value) input of
+                Ok rawValue ->
+                    -- The field was present, so now let's try to decode that value.
+                    -- (If it was present but fails to decode, this should and will fail!)
+                    case Json.Decode.decodeValue (nullOr valDecoder) rawValue of
+                        Ok finalResult ->
+                            Json.Decode.succeed finalResult
+
+                        Err _ ->
+                            -- Return a decoder that we know will fail and also give a nice structured error
+                            Json.Decode.field key (nullOr valDecoder)
+
+                Err _ ->
+                    -- The field was not present, so use the fallback.
+                    Json.Decode.succeed fallback
+    in
+    Json.Decode.value
+        |> Json.Decode.andThen handleResult
 
 
 type Id
@@ -94,6 +184,7 @@ type alias Model =
     , soundEffectsEnabled : Bool
     , soundEffectsVolume : Float
     , tiltControlsEnabled : Bool
+    , ballsUnlocked : List BallSelection
     }
 
 
@@ -110,11 +201,67 @@ type Game
 
 
 type BallSelection
-    = Ball_Original
-    | Ball_Split
+    = Ball_Split
+    | Ball_Original
     | Ball_Poke
     | Ball_Banana
     | Ball_Pinball
+
+
+encodeBall : BallSelection -> Json.Decode.Value
+encodeBall ball =
+    Json.Encode.string <|
+        case ball of
+            Ball_Original ->
+                "original"
+
+            Ball_Split ->
+                "split"
+
+            Ball_Poke ->
+                "poke"
+
+            Ball_Banana ->
+                "banana"
+
+            Ball_Pinball ->
+                "pinball"
+
+
+decodeBall : Json.Decode.Decoder BallSelection
+decodeBall =
+    Json.Decode.string
+        |> Json.Decode.andThen
+            (\ball ->
+                case ball of
+                    "original" ->
+                        Json.Decode.succeed Ball_Original
+
+                    "split" ->
+                        Json.Decode.succeed Ball_Split
+
+                    "poke" ->
+                        Json.Decode.succeed Ball_Poke
+
+                    "banana" ->
+                        Json.Decode.succeed Ball_Banana
+
+                    "pinball" ->
+                        Json.Decode.succeed Ball_Pinball
+
+                    _ ->
+                        Json.Decode.fail "Unknown ball"
+            )
+
+
+allBalls : List BallSelection
+allBalls =
+    [ Ball_Split
+    , Ball_Original
+    , Ball_Poke
+    , Ball_Banana
+    , Ball_Pinball
+    ]
 
 
 type alias LoadedGame =
@@ -172,6 +319,15 @@ type alias BallAssets =
 
 init : Flags -> ( Model, Cmd Msg )
 init { initialSeed, width, height, savedSettings, bestScore, tiltSupported } =
+    let
+        settings =
+            case Json.Decode.decodeValue decodeSettings savedSettings of
+                Err _ ->
+                    defaultSettings
+
+                Ok saved ->
+                    saved
+    in
     ( { seed = Random.initialSeed initialSeed
       , rawSeed = String.fromInt initialSeed
       , userSetSeed = False
@@ -207,11 +363,12 @@ init { initialSeed, width, height, savedSettings, bestScore, tiltSupported } =
 
       -- Settings
       , showSettings = False
-      , musicEnabled = savedSettings.musicEnabled
-      , soundEffectsEnabled = savedSettings.soundEffectsEnabled
-      , musicVolume = savedSettings.musicVolume
-      , soundEffectsVolume = savedSettings.soundEffectsVolume
-      , tiltControlsEnabled = savedSettings.tiltControlsEnabled
+      , musicEnabled = settings.musicEnabled
+      , soundEffectsEnabled = settings.soundEffectsEnabled
+      , musicVolume = settings.musicVolume
+      , soundEffectsVolume = settings.soundEffectsVolume
+      , tiltControlsEnabled = settings.tiltControlsEnabled
+      , ballsUnlocked = settings.ballsUnlocked
       }
     , Task.map3 (\a b c -> ( a, b, c ))
         getBalls
@@ -532,7 +689,7 @@ port stopMusic : String -> Cmd msg
 port resumeMusic : String -> Cmd msg
 
 
-port saveSettings : SavedSettings -> Cmd msg
+port saveSettings : Json.Decode.Value -> Cmd msg
 
 
 port saveScore : Int -> Cmd msg
@@ -840,12 +997,7 @@ update msg model =
                         , seed = Random.initialSeed seed
                       }
                     , saveSettings
-                        { musicEnabled = model.musicEnabled
-                        , soundEffectsEnabled = model.soundEffectsEnabled
-                        , musicVolume = model.musicVolume
-                        , soundEffectsVolume = model.soundEffectsVolume
-                        , tiltControlsEnabled = model.tiltControlsEnabled
-                        }
+                        (encodeSettings model)
                     )
 
         UserResetTiltAngle ->
@@ -907,22 +1059,7 @@ update msg model =
                         | game =
                             Loaded
                                 { game
-                                    | ballSelection =
-                                        case game.ballSelection of
-                                            Ball_Split ->
-                                                Ball_Pinball
-
-                                            Ball_Poke ->
-                                                Ball_Split
-
-                                            Ball_Banana ->
-                                                Ball_Poke
-
-                                            Ball_Original ->
-                                                Ball_Banana
-
-                                            Ball_Pinball ->
-                                                Ball_Original
+                                    | ballSelection = previousInList game.ballSelection model.ballsUnlocked
                                 }
                       }
                     , Cmd.none
@@ -938,22 +1075,7 @@ update msg model =
                         | game =
                             Loaded
                                 { game
-                                    | ballSelection =
-                                        case game.ballSelection of
-                                            Ball_Split ->
-                                                Ball_Poke
-
-                                            Ball_Poke ->
-                                                Ball_Banana
-
-                                            Ball_Banana ->
-                                                Ball_Original
-
-                                            Ball_Original ->
-                                                Ball_Pinball
-
-                                            Ball_Pinball ->
-                                                Ball_Split
+                                    | ballSelection = nextInList game.ballSelection model.ballsUnlocked
                                 }
                       }
                     , Cmd.none
@@ -1014,6 +1136,37 @@ update msg model =
 
                 _ ->
                     ( model, Cmd.none )
+
+
+nextInList : a -> List a -> a
+nextInList current list =
+    nextInListHelper current (list ++ list)
+
+
+nextInListHelper : a -> List a -> a
+nextInListHelper current list =
+    case list of
+        [] ->
+            current
+
+        [ _ ] ->
+            current
+
+        next :: after :: rest ->
+            if current == next then
+                after
+
+            else
+                nextInListHelper current (after :: rest)
+
+
+previousInList : a -> List a -> a
+previousInList current list =
+    let
+        reverseList =
+            List.reverse list
+    in
+    nextInListHelper current (reverseList ++ reverseList)
 
 
 initNewGame : Model -> LoadedGame -> ( Model, Cmd Msg )
