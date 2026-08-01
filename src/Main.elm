@@ -1,8 +1,10 @@
 port module Main exposing (DeviceOrientation, Flags, Game, Id, Model, Msg, Settings, main)
 
 import Angle
+import Axis3d
 import Block3d exposing (Block3d)
 import Browser
+import Browser.Dom
 import Browser.Events
 import Camera3d
 import Color
@@ -27,6 +29,7 @@ import Physics.Shape
 import Pixels
 import Plane3d
 import Point3d exposing (Point3d)
+import Process
 import Quantity
 import Random
 import Scene3d
@@ -78,8 +81,15 @@ defaultSettings =
     , soundEffectsEnabled = True
     , soundEffectsVolume = 1.0
     , tiltControlsEnabled = True
-    , ballsUnlocked = [ Ball_Split, Ball_Original ]
+    , ballsUnlocked = defaultBalls
     }
+
+
+defaultBalls : List BallSelection
+defaultBalls =
+    [ Ball_Split
+    , Ball_Original
+    ]
 
 
 encodeSettings : Model -> Json.Decode.Value
@@ -273,12 +283,13 @@ type alias LoadedGame =
     , floorCount : Int
     , keysDown : Set String
     , assets : Assets
-    , currentGoal : ( GoalFrame, Float )
-    , upcomingGoals : List GoalFrame
-    , previousGoals : List ( GoalFrame, Float, Duration )
+    , currentGoal : ( PointFrame, Float )
+    , upcomingGoals : List PointFrame
+    , previousGoals : List ( PointFrame, Float, Duration )
     , remainingTime : Duration
     , stage : Stage
     , ballSelection : BallSelection
+    , ballPickup : Maybe ( PointFrame, ( Float, Bool ) )
     }
 
 
@@ -293,7 +304,7 @@ type PlayState
     | TimeRanOut
 
 
-type alias GoalFrame =
+type alias PointFrame =
     Frame3d Length.Meters Physics.WorldCoordinates { defines : Physics.BodyCoordinates }
 
 
@@ -304,8 +315,8 @@ type alias Assets =
     , ballBanana : ( BallAssets, BallAssets )
 
     --
-    , holeMesh : Scene3d.Mesh.Textured Physics.BodyCoordinates
-    , holeShadow : Scene3d.Mesh.Shadow Physics.BodyCoordinates
+    , pickupMysteryMesh : Scene3d.Mesh.Textured Physics.BodyCoordinates
+    , pickupMysteryShadow : Scene3d.Mesh.Shadow Physics.BodyCoordinates
     , goalRingMesh : Scene3d.Mesh.Textured Physics.BodyCoordinates
     }
 
@@ -372,7 +383,7 @@ init { initialSeed, width, height, savedSettings, bestScore, tiltSupported } =
       }
     , Task.map3 (\a b c -> ( a, b, c ))
         getBalls
-        (getMesh "hole")
+        (getMesh "pickup_mystery")
         (getMesh "goal_ring")
         |> Task.attempt AssetsLoaded
     )
@@ -730,7 +741,10 @@ type Msg
     | UserChangedSoundEffectsVolume String
     | UserToggledTiltControlsEnabled Bool
     | UserCopiedSeed
+    | UserUnlockedAllSkins
+    | UserResetSkinUnlocks
       --
+    | FocusElement (Result Browser.Dom.Error ())
       --
     | Tick Duration
     | KeyDown String
@@ -741,6 +755,9 @@ type Msg
 update : Msg -> Model -> ( Model, Cmd Msg )
 update msg model =
     case msg of
+        FocusElement _ ->
+            ( model, Cmd.none )
+
         BrowserResized width height ->
             ( { model | width = width, height = height }, Cmd.none )
 
@@ -752,7 +769,7 @@ update msg model =
                 _ ->
                     ( model, Cmd.none )
 
-        AssetsLoaded (Ok ( { ballOriginal, ballSplitMiddle, ballPoke, ballBanana }, holeMesh, goalRingMesh )) ->
+        AssetsLoaded (Ok ( { ballOriginal, ballSplitMiddle, ballPoke, ballBanana }, pickupMysteryMesh, goalRingMesh )) ->
             case model.game of
                 Loading ->
                     let
@@ -761,8 +778,8 @@ update msg model =
                             , ballSplitMiddle = ballSplitMiddle
                             , ballBanana = ballBanana
                             , ballPoke = ballPoke
-                            , holeMesh = holeMesh
-                            , holeShadow = Scene3d.Mesh.shadow holeMesh
+                            , pickupMysteryMesh = pickupMysteryMesh
+                            , pickupMysteryShadow = Scene3d.Mesh.shadow pickupMysteryMesh
                             , goalRingMesh = goalRingMesh
                             }
                     in
@@ -786,6 +803,7 @@ update msg model =
                                 , previousGoals = []
                                 , remainingTime = initTimer
                                 , ballSelection = Ball_Split
+                                , ballPickup = Nothing
                                 }
                       }
                     , Cmd.none
@@ -852,10 +870,26 @@ update msg model =
                             ( model, Cmd.none )
 
                         Playing TimeRanOut ->
-                            ( model, Cmd.none )
+                            ( { model
+                                | game =
+                                    Loaded
+                                        { game
+                                            | ballPickup = animateBallPickup delta game.ballPickup
+                                        }
+                              }
+                            , Cmd.none
+                            )
 
                         Playing Paused ->
-                            ( model, Cmd.none )
+                            ( { model
+                                | game =
+                                    Loaded
+                                        { game
+                                            | ballPickup = animateBallPickup delta game.ballPickup
+                                        }
+                              }
+                            , Cmd.none
+                            )
 
                         Playing Falling ->
                             if Quantity.lessThanOrEqualToZero game.remainingTime then
@@ -869,18 +903,28 @@ update msg model =
                                             |> floor
                                 in
                                 ( { model
-                                    | game = Loaded { game | stage = Playing TimeRanOut }
+                                    | game =
+                                        Loaded
+                                            { game
+                                                | stage = Playing TimeRanOut
+                                                , ballPickup = animateBallPickup delta game.ballPickup
+                                            }
                                   }
-                                , case model.bestScore of
-                                    Nothing ->
-                                        saveScore currentScore
-
-                                    Just bestScore ->
-                                        if currentScore < bestScore then
+                                , Cmd.batch
+                                    [ Process.sleep 0
+                                        |> Task.andThen (\() -> Browser.Dom.focus "drop-in-again")
+                                        |> Task.attempt FocusElement
+                                    , case model.bestScore of
+                                        Nothing ->
                                             saveScore currentScore
 
-                                        else
-                                            Cmd.none
+                                        Just bestScore ->
+                                            if currentScore < bestScore then
+                                                saveScore currentScore
+
+                                            else
+                                                Cmd.none
+                                    ]
                                 )
 
                             else
@@ -1052,6 +1096,26 @@ update msg model =
             , copySeed model.rawSeed
             )
 
+        UserUnlockedAllSkins ->
+            ( { model | ballsUnlocked = allBalls }, Cmd.none )
+
+        UserResetSkinUnlocks ->
+            ( { model
+                | ballsUnlocked = defaultBalls
+                , game =
+                    case model.game of
+                        Loaded game ->
+                            Loaded
+                                { game
+                                    | ballSelection = Ball_Split
+                                }
+
+                        _ ->
+                            model.game
+              }
+            , Cmd.none
+            )
+
         UserSelectedPreviousBall ->
             case model.game of
                 Loaded game ->
@@ -1138,6 +1202,48 @@ update msg model =
                     ( model, Cmd.none )
 
 
+animateBallPickup : Duration -> Maybe ( PointFrame, ( Float, Bool ) ) -> Maybe ( PointFrame, ( Float, Bool ) )
+animateBallPickup delta ballPickup =
+    case ballPickup of
+        Nothing ->
+            ballPickup
+
+        Just ( frame, t ) ->
+            let
+                deltaS =
+                    Duration.inSeconds delta
+            in
+            Just
+                ( frame
+                , lerpOneNegativeOne deltaS t
+                )
+
+
+lerpOneNegativeOne : Float -> ( Float, Bool ) -> ( Float, Bool )
+lerpOneNegativeOne delta ( f, increasing ) =
+    if increasing then
+        let
+            nextF =
+                f + delta
+        in
+        if nextF > 1 then
+            ( 1 - (nextF - 1), False )
+
+        else
+            ( nextF, increasing )
+
+    else
+        let
+            nextF =
+                f - delta
+        in
+        if nextF < -1 then
+            ( -1 + (nextF + 1), True )
+
+        else
+            ( nextF, increasing )
+
+
 nextInList : a -> List a -> a
 nextInList current list =
     nextInListHelper current (list ++ list)
@@ -1201,17 +1307,39 @@ initNewGame model game =
                 (Random.int Random.minInt Random.maxInt)
                 model.seed
 
-        ( seed, rawSeed ) =
+        ( seed, rawSeed, isUserSeed ) =
             if model.userSetSeed then
                 case String.toInt model.rawSeed of
                     Nothing ->
-                        ( Random.initialSeed nextSeed, String.fromInt nextSeed )
+                        ( Random.initialSeed nextSeed, String.fromInt nextSeed, False )
 
                     Just userSeed ->
-                        ( Random.initialSeed userSeed, model.rawSeed )
+                        ( Random.initialSeed userSeed, model.rawSeed, True )
 
             else
-                ( Random.initialSeed nextSeed, String.fromInt nextSeed )
+                ( Random.initialSeed nextSeed, String.fromInt nextSeed, False )
+
+        ballPickup =
+            if isUserSeed then
+                Nothing
+
+            else if List.length allBalls == List.length model.ballsUnlocked then
+                Nothing
+
+            else
+                Random.step
+                    (Random.map
+                        (\( x, y ) ->
+                            Just
+                                ( Point3d.meters (toFloat x) (toFloat y) 0.25
+                                    |> Frame3d.atPoint
+                                , ( 1, False )
+                                )
+                        )
+                        nextHole
+                    )
+                    seed
+                    |> Tuple.first
     in
     ( { model
         | deviceOrientationZero = model.deviceOrientation
@@ -1277,6 +1405,7 @@ initNewGame model game =
                 , previousGoals = []
                 , remainingTime = initTimer
                 , ballSelection = game.ballSelection
+                , ballPickup = ballPickup
                 }
       }
     , playSound
@@ -1420,6 +1549,7 @@ updateFloors delta game model =
                                 :: game.previousGoals
                             )
                     , remainingTime = game.remainingTime |> Quantity.minus delta
+                    , ballPickup = animateBallPickup delta game.ballPickup
                 }
         in
         ( nextGame
@@ -1456,6 +1586,7 @@ updateFloors delta game model =
                                 (animateGoals delta)
                                 game.previousGoals
                         , remainingTime = game.remainingTime |> Quantity.minus delta
+                        , ballPickup = animateBallPickup delta game.ballPickup
                     }
           }
         , False
@@ -1467,7 +1598,7 @@ goalLife =
     Duration.seconds 0.5
 
 
-animateGoals : Duration -> ( GoalFrame, Float, Duration ) -> Maybe ( GoalFrame, Float, Duration )
+animateGoals : Duration -> ( PointFrame, Float, Duration ) -> Maybe ( PointFrame, Float, Duration )
 animateGoals delta ( hole, hue, life ) =
     let
         remainingLife =
@@ -1780,7 +1911,9 @@ viewGame model game =
                                 else
                                     Html.text ""
                         , Html.button
-                            [ Html.Events.onClick UserClickedStart ]
+                            [ Html.Events.onClick UserClickedStart
+                            , Html.Attributes.id "drop-in-again"
+                            ]
                             [ Html.text "Drop-in again" ]
                         , Html.button
                             [ Html.Events.onClick UserOpenedSettings ]
@@ -2025,6 +2158,12 @@ viewSettings model =
                             ""
                 ]
             , Html.button
+                [ Html.Events.onClick UserUnlockedAllSkins ]
+                [ Html.text "Unlock all skins" ]
+            , Html.button
+                [ Html.Events.onClick UserResetSkinUnlocks ]
+                [ Html.text "Reset to default skins" ]
+            , Html.button
                 [ Html.Events.onClick UserClosedSettings ]
                 [ Html.text "Back" ]
             ]
@@ -2122,13 +2261,31 @@ view3d model game =
                 game.assets.goalRingMesh
                 |> Scene3d.scaleAbout Point3d.origin 0.9
                 |> Scene3d.placeIn holeFrame
+            , case game.ballPickup of
+                Nothing ->
+                    Scene3d.nothing
+
+                Just ( frame, ( t, _ ) ) ->
+                    Scene3d.meshWithShadow
+                        (Scene3d.Material.matte Color.red)
+                        game.assets.pickupMysteryMesh
+                        game.assets.pickupMysteryShadow
+                        |> Scene3d.rotateAround Axis3d.x (Angle.degrees (20 * sin t))
+                        |> Scene3d.rotateAround Axis3d.y (Angle.degrees (20 * cos t))
+                        |> Scene3d.placeIn
+                            (frame
+                                |> Frame3d.rotateAroundOwn Frame3d.zAxis
+                                    (Angle.degrees -30)
+                                |> Frame3d.rotateAroundOwn Frame3d.xAxis
+                                    (Angle.degrees 30)
+                            )
             ]
                 ++ List.map (viewGoal game.assets) game.previousGoals
                 ++ game.floors
         }
 
 
-goalLight : ( GoalFrame, Float ) -> Scene3d.Light.Light Physics.WorldCoordinates Bool
+goalLight : ( PointFrame, Float ) -> Scene3d.Light.Light Physics.WorldCoordinates Bool
 goalLight ( frame, hue ) =
     let
         holeColor =
@@ -2141,7 +2298,7 @@ goalLight ( frame, hue ) =
         }
 
 
-prevGoalLight : ( GoalFrame, Float, Duration ) -> Scene3d.Light.Light Physics.WorldCoordinates Bool
+prevGoalLight : ( PointFrame, Float, Duration ) -> Scene3d.Light.Light Physics.WorldCoordinates Bool
 prevGoalLight ( frame, hue, life ) =
     let
         holeColor =
@@ -2157,7 +2314,7 @@ prevGoalLight ( frame, hue, life ) =
         }
 
 
-prevGoalLightNoShadoow : ( GoalFrame, Float, Duration ) -> Scene3d.Light.Light Physics.WorldCoordinates Never
+prevGoalLightNoShadoow : ( PointFrame, Float, Duration ) -> Scene3d.Light.Light Physics.WorldCoordinates Never
 prevGoalLightNoShadoow ( frame, hue, life ) =
     let
         holeColor =
@@ -2203,7 +2360,7 @@ viewGimble point =
         ]
 
 
-viewGoal : Assets -> ( GoalFrame, Float, Duration ) -> Scene3d.Entity Physics.WorldCoordinates
+viewGoal : Assets -> ( PointFrame, Float, Duration ) -> Scene3d.Entity Physics.WorldCoordinates
 viewGoal assets ( frame, hue, life ) =
     let
         holeColor =
