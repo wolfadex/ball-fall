@@ -27,6 +27,7 @@ run = "elm-review --watch --fix"
 
 [tasks.build]
 depends = ["build-elm"]
+run = "rm -f ballfall.zip && zip -r ballfall.zip public"
 
 [tasks.build-review]
 depends = ["build-css"]

@@ -1,4 +1,4 @@
-port module Main exposing (DeviceOrientation, Flags, Game, Id, Model, Msg, Settings, main)
+port module Main exposing (BallSelection, DeviceOrientation, Flags, Game, Id, Model, Msg, Settings, main)
 
 import Angle
 import Axis3d
