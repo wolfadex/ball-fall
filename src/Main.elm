@@ -289,7 +289,7 @@ type alias LoadedGame =
     , remainingTime : Duration
     , stage : Stage
     , ballSelection : BallSelection
-    , ballPickup : Maybe ( PointFrame, ( Float, Bool ) )
+    , ballPickup : Maybe ( PointFrame, ( Float, Bool ), BallSelection )
     }
 
 
@@ -957,8 +957,28 @@ update msg model =
                                                         )
                                                 )
                                                 []
+
+                                    ( finalGame, newBall ) =
+                                        skinGot
+                                            { nextGame
+                                                | remainingTime = game.remainingTime |> Quantity.minus delta
+                                                , ballPickup = animateBallPickup delta game.ballPickup
+                                            }
+
+                                    finalModel =
+                                        { nextModel
+                                            | game =
+                                                Loaded finalGame
+                                            , ballsUnlocked =
+                                                case newBall of
+                                                    Nothing ->
+                                                        model.ballsUnlocked
+
+                                                    Just ball ->
+                                                        ball :: model.ballsUnlocked
+                                        }
                                 in
-                                ( nextModel
+                                ( finalModel
                                 , Cmd.batch
                                     [ Cmd.batch ballHits
                                     , if goalMade then
@@ -969,6 +989,13 @@ update msg model =
 
                                       else
                                         Cmd.none
+                                    , case newBall of
+                                        Nothing ->
+                                            Cmd.none
+
+                                        Just _ ->
+                                            saveSettings
+                                                (encodeSettings finalModel)
                                     ]
                                 )
 
@@ -1202,13 +1229,13 @@ update msg model =
                     ( model, Cmd.none )
 
 
-animateBallPickup : Duration -> Maybe ( PointFrame, ( Float, Bool ) ) -> Maybe ( PointFrame, ( Float, Bool ) )
+animateBallPickup : Duration -> Maybe ( PointFrame, ( Float, Bool ), BallSelection ) -> Maybe ( PointFrame, ( Float, Bool ), BallSelection )
 animateBallPickup delta ballPickup =
     case ballPickup of
         Nothing ->
             ballPickup
 
-        Just ( frame, t ) ->
+        Just ( frame, t, ball ) ->
             let
                 deltaS =
                     Duration.inSeconds delta
@@ -1216,6 +1243,7 @@ animateBallPickup delta ballPickup =
             Just
                 ( frame
                 , lerpOneNegativeOne deltaS t
+                , ball
                 )
 
 
@@ -1323,23 +1351,31 @@ initNewGame model game =
             if isUserSeed then
                 Nothing
 
-            else if List.length allBalls == List.length model.ballsUnlocked then
-                Nothing
-
             else
-                Random.step
-                    (Random.map
-                        (\( x, y ) ->
-                            Just
-                                ( Point3d.meters (toFloat x) (toFloat y) 0.25
-                                    |> Frame3d.atPoint
-                                , ( 1, False )
+                case List.filter (\ball -> not (List.member ball model.ballsUnlocked)) allBalls of
+                    [] ->
+                        Nothing
+
+                    first :: rest ->
+                        Random.step
+                            (Random.map2
+                                (\( x, y ) ball ->
+                                    Just
+                                        ( Point3d.meters
+                                            (toFloat x)
+                                            (toFloat y)
+                                            -- The 12th floor
+                                            -35.75
+                                            |> Frame3d.atPoint
+                                        , ( 1, False )
+                                        , ball
+                                        )
                                 )
-                        )
-                        nextHole
-                    )
-                    seed
-                    |> Tuple.first
+                                nextHole
+                                (Random.uniform first rest)
+                            )
+                            seed
+                            |> Tuple.first
     in
     ( { model
         | deviceOrientationZero = model.deviceOrientation
@@ -1548,8 +1584,6 @@ updateFloors delta game model =
                              )
                                 :: game.previousGoals
                             )
-                    , remainingTime = game.remainingTime |> Quantity.minus delta
-                    , ballPickup = animateBallPickup delta game.ballPickup
                 }
         in
         ( nextGame
@@ -1567,30 +1601,43 @@ updateFloors delta game model =
 
             newHue =
                 holeHue + Duration.inSeconds delta / 2.5
-        in
-        ( game
-        , { model
-            | game =
-                Loaded
-                    { game
-                        | currentGoal =
-                            ( hole
-                            , if newHue > 1 then
-                                newHue - 1
 
-                              else
-                                newHue
-                            )
-                        , previousGoals =
-                            List.filterMap
-                                (animateGoals delta)
-                                game.previousGoals
-                        , remainingTime = game.remainingTime |> Quantity.minus delta
-                        , ballPickup = animateBallPickup delta game.ballPickup
-                    }
+            nextGame =
+                { game
+                    | currentGoal =
+                        ( hole
+                        , if newHue > 1 then
+                            newHue - 1
+
+                          else
+                            newHue
+                        )
+                    , previousGoals =
+                        List.filterMap
+                            (animateGoals delta)
+                            game.previousGoals
+                }
+        in
+        ( nextGame
+        , { model
+            | game = Loaded nextGame
           }
         , False
         )
+
+
+skinGot : LoadedGame -> ( LoadedGame, Maybe BallSelection )
+skinGot game =
+    case game.ballPickup of
+        Nothing ->
+            ( game, Nothing )
+
+        Just ( frame, _, ball ) ->
+            if Point3d.distanceFrom (Frame3d.originPoint frame) (Physics.originPoint game.player) |> Quantity.lessThanOrEqualTo (Length.meters 0.3) then
+                ( { game | ballPickup = Nothing, ballSelection = ball }, Just ball )
+
+            else
+                ( game, Nothing )
 
 
 goalLife : Duration
@@ -1915,6 +1962,7 @@ viewGame model game =
                             , Html.Attributes.id "drop-in-again"
                             ]
                             [ Html.text "Drop-in again" ]
+                        , viewBallSelection game
                         , Html.button
                             [ Html.Events.onClick UserOpenedSettings ]
                             [ Html.text "Settings" ]
@@ -1982,7 +2030,7 @@ viewBallSelection game =
                     , fov = Camera3d.angle (Angle.degrees 30)
                     }
             , clipDepth = Length.millimeters 2
-            , background = Scene3d.backgroundColor Color.black
+            , background = Scene3d.transparentBackground
             , entities =
                 [ viewBall game.assets game.ballSelection
                     |> Scene3d.scaleAbout Point3d.origin 1.25
@@ -2265,7 +2313,7 @@ view3d model game =
                 Nothing ->
                     Scene3d.nothing
 
-                Just ( frame, ( t, _ ) ) ->
+                Just ( frame, ( t, _ ), _ ) ->
                     Scene3d.meshWithShadow
                         (Scene3d.Material.matte Color.red)
                         game.assets.pickupMysteryMesh
