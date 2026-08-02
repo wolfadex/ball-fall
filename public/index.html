@@ -12,7 +12,12 @@
         <script src="elm.js"></script>
         <script>
             const sounds = {};
-            for (const sound of ["goal_made", "ball_hit", "menu_select"]) {
+            for (const sound of [
+                "goal_made",
+                "ball_hit",
+                "menu_select",
+                "pickup_mystery",
+            ]) {
                 sounds[sound] = new Audio(`assets/audio/${sound}.mp3`);
                 sounds[sound].load();
             }

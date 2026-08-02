@@ -994,8 +994,14 @@ update msg model =
                                             Cmd.none
 
                                         Just _ ->
-                                            saveSettings
-                                                (encodeSettings finalModel)
+                                            Cmd.batch
+                                                [ saveSettings
+                                                    (encodeSettings finalModel)
+                                                , playSound
+                                                    { sound = "pickup_mystery"
+                                                    , volume = 1
+                                                    }
+                                                ]
                                     ]
                                 )
 
